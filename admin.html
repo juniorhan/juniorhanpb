@@ -1,0 +1,2099 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>RS Tracker 관리</title>
+<!-- 관리자 화면 — MP 구성·관심 ETF를 저장소(Firestore 문서 하나)에 쓴다. 사이트 링크 없음.
+     D-14(2026-09-25): 로그인 = Firebase 이메일/비밀번호 계정, 쓰기 허용 = 보안 규칙의 관리자 UID 하나. 이 파일에는 공개 식별자(apiKey·projectId)만.
+     D-15(2026-09-25): 입력 폼 → 운용 화면. 행동 하나(편입·편출·비중 조절)마다 '오늘 적용일' 하나에 합쳐 바로 저장한다.
+       저장 형식은 그대로(rows = 적용일별 전체 구성, picks) + exits(편출사유, 계산에는 안 씀).
+       과거 적용일(오늘 이전)의 종목·비중은 저장 직전 검사로 막는다 — 추천사유·편출사유·표시 이름만 고칠 수 있다.
+       추천가는 입력받지 않는다 — 추천일 정규장 종가를 계산(mp_user.py)이 자동으로 쓴다. -->
+<style>
+:root{--bg:#f5f6f8;--surface:#fff;--text:#111827;--mute:#6b7280;--line:#e3e6ea;--accent:#0f766e;--neg:#dc2626;--pos:#059669;--amber:#b45309;--in:#fff;--soft:#f0f4f4}
+@media (prefers-color-scheme:dark){:root{--bg:#0c1015;--surface:#151b22;--text:#e6e8eb;--mute:#98a2b0;--line:#2a3441;--accent:#2dd4bf;--neg:#f87171;--pos:#34d399;--amber:#fbbf24;--in:#0f141a;--soft:#1b242d}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;padding-bottom:60px}
+header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--surface)}
+header b{font-size:15px}
+header .sp{flex:1}
+a{color:var(--accent)}
+main{max-width:1040px;margin:0 auto;padding:14px 16px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px;margin:0 0 12px}
+.mute{color:var(--mute)}
+.small{font-size:12.5px}
+.num{font-variant-numeric:tabular-nums}
+.err{color:var(--neg)}
+.okc{color:var(--pos)}
+.warn{color:var(--amber)}
+.pos{color:var(--pos)}.neg{color:var(--neg)}   /* 사이트 규칙: 상승 초록 · 하락 빨강 */
+h2{font-size:15px;margin:0 0 8px}
+input,select,textarea,button{font:inherit;color:inherit}
+input,select,textarea{width:100%;min-width:0;padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:var(--in)}
+input[aria-invalid=true],textarea[aria-invalid=true]{border-color:var(--neg)}
+textarea{min-height:64px;resize:vertical}
+button{cursor:pointer;border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:7px 12px;white-space:nowrap}
+button.pri{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+button.dng{color:var(--neg)}
+button:disabled{opacity:.45;cursor:default}
+button.lnk{border:0;background:none;padding:0;color:var(--accent);font-size:12px}
+.seg{display:flex;gap:4px;background:var(--line);padding:3px;border-radius:10px;margin:0 0 12px}
+.seg button{flex:1;border:0;background:none;font-weight:600;color:var(--mute);padding:7px 6px}
+.seg button[aria-pressed=true]{background:var(--surface);color:var(--text)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
+.chips button{border-radius:999px;padding:4px 11px;font-size:13px}
+.chips button[aria-pressed=true]{border-color:var(--accent);color:var(--accent);font-weight:600}
+.chip{display:inline-block;font-size:11px;line-height:1.6;padding:0 6px;border-radius:999px;border:1px solid var(--line);color:var(--mute);white-space:nowrap}
+.help{font-size:12.5px;color:var(--mute);margin:6px 0 0}
+.kpi{display:flex;gap:6px 18px;flex-wrap:wrap;align-items:baseline;margin:0 0 12px}
+.kpi b{font-size:18px}
+.acts{display:flex;gap:8px;flex-wrap:wrap}
+.acts button{font-weight:600}
+/* 현재 구성 — PC는 표, 휴대폰은 카드(같은 요소, CSS만 다름) */
+.hl{display:grid;grid-template-columns:minmax(0,1fr) 78px 96px 96px 72px 76px 54px 66px 168px;gap:8px;align-items:center;padding:9px 0;border-top:1px solid var(--line);font-size:13px}
+.hl.hd{font-size:12px;color:var(--mute);border-top:0;padding:0 0 6px}
+.hl .r{text-align:right}
+.c-nm{min-width:0}
+.c-nm b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+.c-nm .sub{font-size:12px;color:var(--mute)}
+.c-w b{font-size:14px}
+.c-a{display:flex;gap:4px;justify-content:flex-end}
+.c-a button{padding:5px 8px;font-size:12.5px}
+.det{grid-column:1/-1;background:var(--soft);border-radius:8px;padding:10px 12px;font-size:12.5px}
+.memo{white-space:pre-line}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 12px}
+.kv span:nth-child(odd){color:var(--mute)}
+.today{border-color:var(--accent)}
+ul.dl{margin:6px 0 0;padding-left:18px}
+ul.dl li{margin:3px 0}
+.vh{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 4px}
+.lock{font-size:12px;color:var(--mute)}
+.login{max-width:360px;margin:40px auto}
+.login label{display:block;margin:0 0 10px;font-size:12.5px;color:var(--mute)}
+.star{border:0;background:none;padding:2px 3px;font-size:19px;line-height:1;color:var(--mute);flex:none}
+.star[aria-pressed=true]{color:var(--amber)}
+.nmr{display:flex;align-items:center;gap:2px;min-width:0}
+.nmr b{min-width:0}
+.wl{display:grid;grid-template-columns:30px minmax(0,1fr) 190px 96px 136px;gap:8px;align-items:center;padding:9px 0;border-top:1px solid var(--line);font-size:13px}
+.wl .c-a{justify-content:flex-end}
+.w-n{min-width:0}
+.w-n b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.w-n .sub{font-size:12px;color:var(--mute)}
+.w-m{text-align:right}
+.wi{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:4px 8px;align-items:center;padding:8px 2px;border-top:1px solid var(--line)}
+.wi .m1{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wi .m2{font-size:12px;color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wi .rk{font-size:12px;text-align:right;white-space:nowrap}
+.mpin{font-size:12px;font-weight:600;color:var(--accent);white-space:nowrap}
+#wres .wi:first-child{margin-top:8px}
+#nlw{max-width:1040px;margin:0 auto;padding:14px 16px 0}
+#nlw .card{margin:0}
+.nl form{display:flex;gap:6px;margin-top:6px}
+.nl form input{flex:1;min-width:0}
+.nl-log{max-height:46vh;overflow:auto;margin:6px 0 0;overscroll-behavior:contain}
+.nl-log:empty{display:none}
+.nm{margin:8px 0;font-size:13.5px;overflow-wrap:anywhere}
+.nm.me{text-align:right}
+.nm.me span{display:inline-block;background:var(--soft);border-radius:10px;padding:5px 10px;max-width:90%;text-align:left;white-space:pre-wrap}
+.nm.sys{border-left:3px solid var(--line);padding:2px 0 2px 10px}
+.nm.q{border-left-color:var(--amber)}.nm.ok{border-left-color:var(--pos)}.nm.bad{border-left-color:var(--neg)}.nm.pv{border-left:0;padding:0}
+.pv{border:1px solid var(--accent);border-radius:10px;padding:10px 12px}
+.pv ol{margin:6px 0;padding-left:20px}
+.pv li{margin:5px 0}
+.nb{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.nb button{white-space:normal;text-align:left}
+.nt{width:100%;border-collapse:collapse;font-size:12.5px;margin:4px 0}
+.nt td{padding:3px 8px 3px 0;border-top:1px solid var(--line);vertical-align:top}
+.nt td.r{text-align:right;white-space:nowrap}
+.mk{color:var(--mute)}
+.mk.hit{color:var(--neg);font-weight:600}
+/* 창(편입·편출·비중 조절·사유) — 휴대폰은 전체 화면 */
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20;display:flex;align-items:center;justify-content:center;padding:16px}
+.sheet{background:var(--surface);border-radius:14px;width:100%;max-width:720px;max-height:calc(100vh - 32px);display:flex;flex-direction:column;overflow:hidden}
+.sh-h{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.sh-h b{flex:1;font-size:15px;min-width:0}
+.sh-h .x{border:0;padding:4px 8px;font-size:16px}
+.sh-b{padding:12px 14px;overflow:auto;flex:1;min-height:0}
+.sh-f{padding:10px 14px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.sh-f .st{flex:1 1 180px;min-width:0;font-size:13px}
+.it{display:grid;grid-template-columns:26px minmax(0,1fr) auto;gap:4px 8px;align-items:start;padding:9px 2px;border-top:1px solid var(--line);cursor:pointer}
+.it input[type=checkbox]{width:18px;height:18px;margin:3px 0 0;padding:0}
+.it .m1{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.it .m2{font-size:12px;color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.it .rk{font-size:12px;text-align:right;white-space:nowrap}
+.it[aria-disabled=true]{cursor:default}
+.it[aria-disabled=true] .m1{color:var(--mute)}
+.it .more{grid-column:2/-1;background:var(--soft);border-radius:8px;padding:8px 10px;font-size:12.5px;cursor:default}
+.direct{padding:10px 2px;border-top:1px solid var(--line);font-size:13px}
+.direct button{margin:6px 6px 0 0}
+.selbar{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.selbar button{border-radius:999px;padding:3px 10px;font-size:12.5px;border-color:var(--accent);color:var(--accent)}
+.opt{display:block;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0 0 8px;cursor:pointer}
+.opt input[type=radio]{width:auto;margin:0 6px 0 0;vertical-align:-2px}
+.opt[data-on=true]{border-color:var(--accent);background:var(--soft)}
+.opt .in{display:flex;gap:8px;align-items:center;margin:8px 0 0 22px;flex-wrap:wrap;font-size:13px}
+.opt .in input{width:110px}
+.wbox{position:relative;display:inline-block}
+.wbox input{padding-right:24px;text-align:right}
+.wbox span{position:absolute;right:8px;top:50%;transform:translateY(-50%);color:var(--mute);font-size:12px}
+.nw{display:grid;grid-template-columns:minmax(0,1fr) 120px;gap:8px;align-items:center;padding:7px 0;border-top:1px solid var(--line);font-size:13px}
+.nw .wbox{width:120px}
+.nw .wbox input{width:120px}
+.rs{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0 0 10px}
+.rs .cnt{font-size:12px;color:var(--mute);text-align:right}
+.tot{font-size:13px}
+.tot b{font-size:14px}
+details summary{cursor:pointer;font-size:13px;margin:8px 0 4px}
+.toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:9px 14px;border-radius:10px;font-size:13px;z-index:30;max-width:calc(100vw - 24px)}
+.toast.bad{background:var(--neg);color:#fff}
+/* 사이트 탭(D-18) — 공개 설정 · 연결 수단 · 운영자 소개 · 글 */
+label.sv{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;padding:7px 0;border-top:1px solid var(--line)}
+label.sv:first-of-type{border-top:0}
+label.sv input,.tgl input{width:auto}
+.sl-r{border-top:1px solid var(--line);padding:10px 0;display:grid;gap:6px}
+details.sl-r{display:block}
+details.sl-r > summary{cursor:pointer;list-style:none;display:flex;gap:8px;align-items:baseline;min-width:0}
+details.sl-r > summary::-webkit-details-marker{display:none}
+details.sl-r > summary::before{content:'▸';color:var(--mute);flex:none}
+details.sl-r[open] > summary::before{content:'▾'}
+details.sl-r > summary b{flex:none}
+details.sl-r > summary .lv{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sl-b{display:grid;gap:6px;margin-top:8px}
+.lr1{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.lr1 select{width:auto}
+.tgl{display:inline-flex;gap:6px;align-items:center;font-size:13px;white-space:nowrap}
+.plr{display:flex;gap:6px 8px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line);padding:9px 0;font-size:13px}
+.plr b{min-width:0;overflow-wrap:anywhere}
+.pe{border:1px solid var(--line);border-radius:10px;padding:12px;margin:0 0 10px;background:var(--soft)}
+@media (max-width:640px){
+  input,select,textarea{font-size:16px}
+  main{padding:12px 10px}
+  .card{padding:12px}
+  .hl{grid-template-columns:repeat(3,minmax(0,1fr));grid-template-areas:"nm nm w" "d p0 p1" "ret rk sc" "a a a";gap:6px 8px;padding:12px 0}
+  .hl.hd{display:none}
+  .c-nm{grid-area:nm}.c-w{grid-area:w}.c-d{grid-area:d}.c-p0{grid-area:p0}.c-p1{grid-area:p1}.c-ret{grid-area:ret}.c-rk{grid-area:rk}.c-sc{grid-area:sc}.c-a{grid-area:a}
+  .hl .r{text-align:left}
+  .hl .c-w{text-align:right}
+  .hl [data-l]::before{content:attr(data-l);display:block;font-size:11px;color:var(--mute)}
+  .c-a{justify-content:flex-start}
+  .c-a button{flex:1}
+  .wl{grid-template-columns:30px minmax(0,1fr) auto;grid-template-areas:"s n m" ". r r" ". a a";gap:4px 8px}
+  .wl .w-s{grid-area:s}.wl .w-n{grid-area:n}.wl .w-m{grid-area:m}.wl .w-r{grid-area:r}.wl .c-a{grid-area:a;justify-content:flex-start}
+  .ov{padding:0;align-items:stretch}
+  .sheet{max-width:none;max-height:none;height:100%;border-radius:0}
+  .opt .in{margin-left:0}
+  .nw{grid-template-columns:minmax(0,1fr) 110px}
+  .nw .wbox,.nw .wbox input{width:110px}
+}
+</style>
+</head>
+<body>
+<header><b>RS Tracker 관리</b><span class="mute small" id="who"></span><span class="sp"></span><a href="./" target="_blank" rel="noopener">사이트 보기</a><button id="out" hidden>로그아웃</button></header>
+<div id="nlw" hidden></div>
+<main id="root"><div class="card">불러오는 중…</div></main>
+<div class="ov" id="modal" hidden><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="mt"><div class="sh-h"><b id="mt"></b><button type="button" class="x" id="mx" aria-label="닫기">✕</button></div><div class="sh-b" id="mb"></div><div class="sh-f" id="mf"></div></div></div>
+<div class="toast" id="toast" hidden></div>
+<script>
+(function(){
+var STORE = {"apiKey": "AIzaSyAXWPfsrSRfBZ0KXD_VBz3DgPLOnUZaBAw", "projectId": "junior-han", "doc": "rs_tracker/mp", "ai": "https://script.google.com/macros/s/AKfycbwUFUZ4MHgUhdE5dxE4s2Kgx_tN3VGCG8f9Q5NuVzVFhCXp-s59TGZ4IkKs_-BykFm7Pw/exec"};
+var TYPES = ['한국주식', '한국ETF', '미국주식', '미국ETF', '암호화폐', '달러', '원화', '기타'];   // mp_user.TYPES와 같은 목록
+var T2K = {KS: '한국주식', KE: '한국ETF', US: '미국주식', UE: '미국ETF'}, K2T = {'한국주식': 'KS', '한국ETF': 'KE', '미국주식': 'US', '미국ETF': 'UE'};
+var MKT = {KS: 'korea', US: 'us', KE: 'kr_etf', UE: 'us_etf'};
+var MEMO_MAX = 200;
+var $ = function(s){ return document.querySelector(s); };
+function esc(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, function(c){ return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]; }); }
+function today(){ return new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10); }   // 한국 날짜
+function cents(v){ return Math.round(Number(v) * 100); }
+function pct(c){ return (c / 100).toFixed(2); }                                             // 센트(정수) → '12.34'
+function clone(o){ return JSON.parse(JSON.stringify(o)); }
+function lsGet(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v){ try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
+function num(v, d){ return v == null || !isFinite(v) ? '–' : Number(v).toFixed(d == null ? 1 : d); }
+function sgn(v, d){ return v == null || !isFinite(v) ? '–' : (v > 0 ? '+' : '') + Number(v).toFixed(d == null ? 1 : d); }
+function sgnp(v){ return v == null ? '–' : sgn(v, 1) + '%'; }
+function money(v, krw){
+  if (v == null || !isFinite(v)) return '–';
+  if (krw) return v >= 1e12 ? (v / 1e12).toFixed(1) + '조' : Math.round(v / 1e8).toLocaleString() + '억';
+  return v >= 1e9 ? '$' + (v / 1e9).toFixed(2) + 'B' : '$' + Math.round(v / 1e6).toLocaleString() + 'M';
+}
+function pxf(v, ccy){ if (v == null) return null; if (ccy === 'KRW') return Math.round(v).toLocaleString(); return v < 1 ? v.toFixed(4) : v.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
+// 합이 정확히 total(센트)이 되게 나눈다(최대 잔여 방식) — raw는 비율(합 아무거나)
+function alloc(total, raw){
+  var s = raw.reduce(function(a, b){ return a + b; }, 0);
+  if (!(s > 0) || total <= 0) return raw.map(function(){ return 0; });
+  var ex = raw.map(function(r){ return r / s * total; }), fl = ex.map(function(e){ return Math.floor(e + 1e-9); });
+  var left = total - fl.reduce(function(a, b){ return a + b; }, 0);
+  var ord = ex.map(function(e, i){ return [e - fl[i], i]; }).sort(function(a, b){ return b[0] - a[0] || a[1] - b[1]; });
+  for (var k = 0; k < left; k++) fl[ord[k % ord.length][1]]++;
+  return fl;
+}
+
+if (!STORE || !STORE.apiKey) { $('#root').innerHTML = '<div class="card">저장소가 아직 연결되지 않았습니다(mp/store.json). 연결 뒤 다시 게시하면 이 화면에서 로그인할 수 있습니다.</div>'; return; }
+var EP = STORE.endpoints || {}, KEY = encodeURIComponent(STORE.apiKey);
+var AUTH = EP.auth || 'https://identitytoolkit.googleapis.com/v1', TOKEN = EP.token || 'https://securetoken.googleapis.com/v1';
+var DOC = (EP.firestore || 'https://firestore.googleapis.com/v1') + '/projects/' + encodeURIComponent(STORE.projectId) + '/databases/(default)/documents/' + (STORE.doc || 'rs_tracker/mp');
+
+// ---------------------------------------------------------------- 로그인(Firebase Auth REST) — 비밀번호는 저장하지 않는다. 갱신 토큰만 이 브라우저에.
+var SES = null;   // {id, exp, rt, uid, email}
+function authErr(j){
+  var m = ((j && j.error && j.error.message) || '').split(' ')[0];
+  return {EMAIL_NOT_FOUND: '이메일 또는 비밀번호가 맞지 않습니다.', INVALID_PASSWORD: '이메일 또는 비밀번호가 맞지 않습니다.', INVALID_LOGIN_CREDENTIALS: '이메일 또는 비밀번호가 맞지 않습니다.',
+    INVALID_EMAIL: '이메일 형식이 아닙니다.', USER_DISABLED: '사용 중지된 계정입니다.', TOO_MANY_ATTEMPTS_TRY_LATER: '시도가 많아 잠시 막혔습니다. 몇 분 뒤 다시 하세요.',
+    TOKEN_EXPIRED: '로그인이 만료됐습니다.', INVALID_REFRESH_TOKEN: '로그인이 만료됐습니다.', USER_NOT_FOUND: '계정이 없습니다.'}[m] || ('로그인 실패(' + (m || '통신') + ')');
+}
+function setSes(id, rt, sec, uid, email){
+  SES = {id: id, rt: rt, exp: Date.now() + (Number(sec) || 3600) * 1000, uid: uid, email: email};
+  lsSet('rs_admin_rt', rt); lsSet('rs_admin_em', email || '');
+  $('#who').textContent = email || ''; $('#out').hidden = false;
+}
+function signIn(email, pw){
+  return fetch(AUTH + '/accounts:signInWithPassword?key=' + KEY, {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({email: email, password: pw, returnSecureToken: true})})
+    .then(function(r){ return r.json().then(function(j){ if (!r.ok) throw new Error(authErr(j)); setSes(j.idToken, j.refreshToken, j.expiresIn, j.localId, j.email); }); });
+}
+function refresh(rt){
+  return fetch(TOKEN + '/token?key=' + KEY, {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'grant_type=refresh_token&refresh_token=' + encodeURIComponent(rt)})
+    .then(function(r){ return r.json().then(function(j){ if (!r.ok) throw new Error(authErr(j)); setSes(j.id_token, j.refresh_token, j.expires_in, j.user_id, lsGet('rs_admin_em')); }); });
+}
+function idToken(){ return SES && SES.exp - Date.now() > 300e3 ? Promise.resolve(SES.id) : refresh(SES.rt).then(function(){ return SES.id; }); }
+function logout(){ SES = null; lsSet('rs_admin_rt', null); lsSet('rs_admin_em', null); location.reload(); }
+$('#out').onclick = function(){ if (!MS || !mDirty() || confirm('입력 중인 내용이 사라집니다. 로그아웃할까요?')) logout(); };
+
+function showLogin(msg){
+  $('#root').innerHTML = '<div class="card login"><h2>관리자 로그인</h2>'
+    + '<form id="lf"><label>이메일<input type="email" id="em" autocomplete="username" required value="' + esc(lsGet('rs_admin_em') || '') + '"></label>'
+    + '<label>비밀번호<input type="password" id="pw" autocomplete="current-password" required></label>'
+    + '<button class="pri" type="submit" style="width:100%">로그인</button><p class="err small" id="lerr">' + esc(msg || '') + '</p></form>'
+    + '<p class="help">방문자는 사이트를 보기만 합니다. 저장은 등록된 관리자 계정 하나만 할 수 있습니다.</p></div>';
+  $('#lf').onsubmit = function(e){
+    e.preventDefault();
+    var b = e.target.querySelector('button'); b.disabled = true; $('#lerr').textContent = '';
+    signIn($('#em').value.trim(), $('#pw').value).then(start, function(x){ b.disabled = false; $('#lerr').textContent = x.message; });
+  };
+}
+
+// ---------------------------------------------------------------- 저장소 문서
+var UT = null, S = null, VIEW = 'mp', OPEN = {}, SET = null, BUSY = false;
+function loadDoc(){
+  return fetch(DOC + '?key=' + KEY, {cache: 'no-store'}).then(function(r){
+    if (r.status === 404) return {state: {}, ut: null};
+    if (r.status === 403) throw new Error('저장소 읽기가 막혀 있습니다 — Firestore 보안 규칙(rs_tracker/mp 읽기 허용)이 게시됐는지 확인하세요.');
+    if (!r.ok) throw new Error('문서 읽기 실패(' + r.status + ')');
+    return r.json().then(function(d){ return {state: JSON.parse(((d.fields || {}).json || {}).stringValue || '{}'), ut: d.updateTime}; });
+  });
+}
+// 쓰기 권한 확인(로그인 직후) — 일부러 맞을 수 없는 버전 조건(2000-01-01)을 붙인 쓰기라 실제로는 아무것도 저장되지 않는다.
+// 보안 규칙이 먼저 판정하므로 관리자 UID가 아니면 PERMISSION_DENIED, 관리자면 조건 불일치(FAILED_PRECONDITION·NOT_FOUND).
+// 관리자 UID는 이 파일에 없다 — 판정은 Firestore 보안 규칙만 한다.
+function canWrite(){
+  return idToken().then(function(tok){
+    return fetch(DOC + '?key=' + KEY + '&currentDocument.updateTime=2000-01-01T00%3A00%3A00Z', {method: 'PATCH',
+      headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok},
+      body: JSON.stringify({fields: {json: {stringValue: '{}'}, saved_at: {timestampValue: new Date().toISOString()}}})});
+  }).then(function(r){ return r.json().then(function(j){
+    var st = (j.error && j.error.status) || '';
+    return !(st === 'PERMISSION_DENIED' || st === 'UNAUTHENTICATED' || r.status === 401 || r.status === 403);
+  }); });
+}
+function normCode(t, c){   // mp_user.norm_code와 같은 규칙
+  c = String(c || '').trim();
+  if (t === '한국주식' || t === '한국ETF') return /^\d+$/.test(c) ? ('000000' + c).slice(-Math.max(6, c.length)) : c.toUpperCase();
+  return {'달러': 'USD', '원화': 'KRW'}[t] || c.toUpperCase();
+}
+function normList(a){ return (a || []).filter(function(p){ return p && p.code; }).map(function(p){ var o = {market: p.market === '미국' ? '미국' : '한국', code: String(p.code).trim().toUpperCase()}; if (p.memo && String(p.memo).trim()) o.memo = String(p.memo).trim(); return o; }); }
+function norm(s){   // 저장 형식 정리(모르는 필드는 버린다)
+  var st = s.settings || {}, rows = [];
+  (s.rows || []).forEach(function(r){
+    var o = {date: String(r.date || ''), type: String(r.type || ''), code: normCode(r.type, r.code), weight: Number(r.weight)};
+    if (r.name && String(r.name).trim()) o.name = String(r.name).trim();
+    if (r.memo && String(r.memo).trim()) o.memo = String(r.memo).trim();
+    rows.push(o); });
+  rows.sort(function(a, b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+  return {settings: {name: String(st.name || '').trim(), intro: String(st.intro || '').trim(), visible: st.visible !== false}, rows: rows,
+    picks: normList(s.picks), watch: normList(s.watch),   // picks = 관심 ETF, watch = 관심 종목(주식)
+    exits: (s.exits || []).filter(function(e){ return e && e.date && e.code; }).map(function(e){ return {date: String(e.date), type: String(e.type), code: String(e.code), memo: String(e.memo || '').trim()}; })};
+}
+function toSave(N){ var o = {settings: N.settings, rows: N.rows, picks: N.picks}; if (N.watch.length) o.watch = N.watch; if (N.exits.length) o.exits = N.exits; return o; }
+
+// ---------------------------------------------------------------- 구성(적용일) 계산
+function kOf(r){ return r.type + '|' + r.code; }
+function sigOf(rows){ return rows.map(function(r){ return r.type + '|' + r.code + '|' + Number(r.weight).toFixed(4); }).sort().join('\n'); }
+function vers(X){ var by = {}; X.rows.forEach(function(r){ (by[r.date] = by[r.date] || []).push(r); }); return Object.keys(by).sort().map(function(d){ return {date: d, rows: by[d]}; }); }
+function latest(X){ var v = vers(X); return v.length ? v[v.length - 1] : null; }
+function baseVer(X){ var t = today(), v = vers(X).filter(function(x){ return x.date < t; }); return v.length ? v[v.length - 1] : null; }   // 어제까지 확정된 구성
+function todayVer(X){ var l = latest(X); return l && l.date === today() ? l : null; }
+// 전부 편출한 날 = '원화 현금 100%' 한 줄(D-21). 적용일은 행으로만 생기므로 빈 구성을 이렇게 적는다 — mp_user·공개 페이지가 이미 아는 자산구분(원화 = 가격 1).
+// 관리자 화면은 이 줄을 종목으로 세지 않는다(보유 0종목 · 현금 100%). 관리자 화면에서 원화를 편입하는 길은 없다.
+function isCashRow(r){ return r.type === '원화'; }
+var CASH_ROW = {type: '원화', code: 'KRW', name: '원화 현금', weight: 100};
+function comp(X){ var l = latest(X || S); return l ? l.rows.filter(function(r){ return !isCashRow(r); }).map(function(r){ return {type: r.type, code: r.code, name: r.name || '', weight: Number(r.weight), memo: r.memo || ''}; }) : []; }
+function sumC(c){ return c.reduce(function(a, r){ return a + cents(r.weight); }, 0); }
+function sinceOf(X, key){ var vs = vers(X), d = null; for (var i = vs.length - 1; i >= 0; i--) { if (vs[i].rows.some(function(r){ return kOf(r) === key; })) d = vs[i].date; else break; } return d; }
+// 오늘 구성(nc)을 적용일 '오늘' 하나로 합친다. 기준(어제까지) 구성과 비중까지 같으면 오늘 적용일을 만들지 않는다(불필요한 재조정 방지).
+// 편출 기록 = 기준 구성에 있었는데 오늘 구성에 없는 것(오늘 넣었다 뺀 것은 기록 없음). exMemo = 이번 행동의 편출사유 {key: 문구}.
+function withToday(X, nc, exMemo){
+  var t = today(), b = baseVer(X), N = clone(X), rows = nc.length || !b ? nc : [CASH_ROW], same = !!b && sigOf(b.rows) === sigOf(rows);   // 전부 빼면 원화 현금 100%
+  if (!b && !nc.length) same = true;
+  N.rows = X.rows.filter(function(r){ return r.date < t; }).map(clone);
+  if (!same) rows.forEach(function(r){ var o = {date: t, type: r.type, code: r.code, weight: cents(r.weight) / 100}; if (r.name) o.name = r.name; if (r.memo) o.memo = r.memo; N.rows.push(o); });
+  var inNew = {}; nc.forEach(function(r){ inNew[kOf(r)] = 1; });
+  var old = {}; X.exits.forEach(function(e){ if (e.date === t) old[e.type + '|' + e.code] = e.memo; });
+  N.exits = X.exits.filter(function(e){ return e.date < t; }).map(clone);
+  if (b && !same) b.rows.forEach(function(r){ var k = kOf(r); if (!inNew[k] && !isCashRow(r)) N.exits.push({date: t, type: r.type, code: r.code, memo: (exMemo && exMemo[k] != null ? exMemo[k] : old[k]) || ''}); });
+  return N;
+}
+// 과거 기록 잠금 — 오늘 이전 적용일의 종목·비중(=추천일·추천가 기준)과 과거 편출 기록은 바뀌면 저장하지 않는다. 사유·이름 문구만 예외.
+function pastSig(X, t){ return X.rows.filter(function(r){ return r.date < t; }).map(function(r){ return r.date + '|' + r.type + '|' + r.code + '|' + Number(r.weight).toFixed(4); }).sort().join('\n'); }
+function lockErr(O, N){
+  var t = today();
+  if (pastSig(O, t) !== pastSig(N, t)) return '과거 적용일(' + t + ' 이전)의 종목·비중은 바꿀 수 없습니다 — 과거 기록은 잠겨 있습니다.';
+  if (N.rows.some(function(r){ return r.date > t; })) return '미래 날짜 적용일은 만들 수 없습니다.';
+  var ne = {}; N.exits.forEach(function(e){ ne[e.date + '|' + e.type + '|' + e.code] = 1; });
+  if (O.exits.some(function(e){ return e.date < t && !ne[e.date + '|' + e.type + '|' + e.code]; })) return '과거 편출 기록은 지울 수 없습니다.';
+  return null;
+}
+function compErr(rows){   // mp_user.read_input과 같은 규칙 + 소수 둘째 자리
+  var seen = {}, sum = 0;
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i], c = cents(r.weight), tag = (r.code || '?') + ': ';
+    if (TYPES.indexOf(r.type) < 0) return tag + '자산구분이 없습니다';
+    if (!r.code) return '코드가 빈 종목이 있습니다';
+    if ((r.type === '한국주식' || r.type === '한국ETF') && r.code.length !== 6) return tag + '한국 코드는 6자리';
+    if (!isFinite(Number(r.weight)) || !(c > 0)) return tag + '비중은 0보다 커야 합니다(빼려면 편출)';
+    if (Math.abs(Number(r.weight) * 100 - c) > 1e-6) return tag + '비중은 소수 둘째 자리까지';
+    if (seen[kOf(r)]) return tag + '같은 종목이 두 번';
+    seen[kOf(r)] = 1; sum += c;
+  }
+  if (sum > 10000) return '비중 합 ' + pct(sum) + '% > 100%';
+  return null;
+}
+function stateErr(N){ var e = null; vers(N).forEach(function(v){ if (!e && v.date === today()) e = compErr(v.rows); }); return e; }
+function mpSig(rows){ return rows.map(function(r){ return r.date + '|' + r.type + '|' + r.code + '|' + Number(r.weight).toFixed(4); }).sort().join('\n'); }
+
+// ---------------------------------------------------------------- 저장 = 즉시 공개
+function persist(N, msg){
+  if (BUSY) return Promise.reject(new Error('저장 중입니다'));
+  var e = lockErr(S, N) || stateErr(N);
+  if (e) return Promise.reject(new Error(e));
+  if (JSON.stringify(toSave(N)).length >= 290000) return Promise.reject(new Error('저장 문서가 너무 큽니다(보안 규칙 300KB 한도).'));
+  BUSY = true;
+  var body = {fields: {json: {stringValue: JSON.stringify(toSave(N))}, saved_at: {timestampValue: new Date().toISOString()}}};
+  var pre = UT ? 'currentDocument.updateTime=' + encodeURIComponent(UT) : 'currentDocument.exists=false';
+  return idToken().then(function(tok){
+    return fetch(DOC + '?key=' + KEY + '&' + pre, {method: 'PATCH', headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok}, body: JSON.stringify(body)});
+  }).then(function(r){ return r.json().then(function(j){
+    if (r.ok) return j;
+    var st = (j.error && j.error.status) || r.status;
+    if (st === 'FAILED_PRECONDITION' || st === 'ALREADY_EXISTS') throw new Error('다른 창에서 먼저 저장됐습니다. 새로고침해서 최신 내용을 불러온 뒤 다시 하세요.');
+    if (st === 'PERMISSION_DENIED' || r.status === 403) throw new Error('이 계정에는 저장 권한이 없습니다(보안 규칙의 관리자 UID 확인).');
+    if (st === 'UNAUTHENTICATED' || r.status === 401) throw new Error('로그인이 만료됐습니다. 다시 로그인하세요.');
+    throw new Error('저장 실패(' + st + ')');
+  }); }).then(function(j){
+    BUSY = false; UT = j.updateTime; S = norm(JSON.parse(JSON.stringify(toSave(N)))); SET = null;
+    toast(msg || '저장됨 — 사이트에 바로 반영');
+    render();
+  }, function(x){ BUSY = false; throw x; });
+}
+var TT = null;
+function toast(h, bad){ var e = $('#toast'); e.innerHTML = esc(h); e.className = 'toast' + (bad ? ' bad' : ''); e.hidden = false; clearTimeout(TT); TT = setTimeout(function(){ e.hidden = true; }, 7000); }
+
+// ---------------------------------------------------------------- 참고 자료: 검색 목록(data/search.json) · 계산본(data/mp.json) · 계산 상태
+var IDX = null, IX = {}, IXF = {}, MPDOC = null, MPH = {}, STATUS = null;
+function loadIndex(){
+  return fetch('data/search.json', {cache: 'no-cache'}).then(function(r){ return r.ok ? r.json() : null; }).then(function(j){
+    if (!j) return;
+    IDX = j; j.fields.forEach(function(f, i){ IXF[f] = i; });
+    j.rows.forEach(function(r){ IX[r[0] + '|' + r[1]] = r; });
+  }).catch(function(){});
+}
+function loadCalc(){
+  return Promise.all([
+    fetch('data/mp.json', {cache: 'no-store'}).then(function(r){ return r.ok ? r.json() : null; }).then(function(j){ MPDOC = j; MPH = {}; ((j && j.holdings) || []).forEach(function(h){ MPH[h.key] = h; }); }).catch(function(){}),
+    fetch('data/mp_status.json', {cache: 'no-store'}).then(function(r){ return r.ok ? r.json() : null; }).then(function(j){ STATUS = j; }).catch(function(){})]);
+}
+function g(r, f){ var i = IXF[f], v = i == null ? null : r[i]; return v === undefined ? null : v; }
+function idxOf(type, code){ var t = K2T[type]; return (t && IX[t + '|' + code]) || null; }
+function secKo(s){ return (IDX && IDX.sector_ko && IDX.sector_ko[s]) || s; }
+function nameOf(type, code){
+  var k = type + '|' + code, n = null;
+  S.rows.forEach(function(r){ if (kOf(r) === k && r.name) n = r.name; });
+  if (n) return n;
+  if (MPDOC && MPDOC.names && MPDOC.names[k]) return MPDOC.names[k];
+  var ix = idxOf(type, code); if (ix) return ix[2];
+  return {'달러': '달러 현금', '원화': '원화 현금'}[type] || code;
+}
+function rsShort(ix){ if (!ix || g(ix, 'rk') == null) return null; return '#' + g(ix, 'rk') + '/' + ((IDX.n || {})[MKT[ix[0]]] || '–'); }
+function detailKv(ix){
+  var t = ix[0], etf = t === 'KE' || t === 'UE', krw = t === 'KS' || t === 'KE', kv = [];
+  if (g(ix, 'rk') != null) kv.push(['순위', '#' + g(ix, 'rk') + ' / ' + (IDX.n[MKT[t]] || '–') + ' · ' + (IDX.asof[MKT[t]] || '') + ' 종가 기준'],
+    ['Score · RS Rating', num(g(ix, 'sc'), 2) + ' · ' + (g(ix, 'rr') == null ? '–' : g(ix, 'rr'))], ['라벨 · Accel', (g(ix, 'lb') || '–') + ' · ' + sgn(g(ix, 'ac'))]);
+  if (etf && g(ix, 'a1') != null) kv.push(['수익률 1M·3M·6M·12M', [g(ix, 'a1'), g(ix, 'a3'), g(ix, 'a6'), g(ix, 'a12')].map(sgnp).join(' · ')]);
+  if (g(ix, 'r1') != null) kv.push(['상대강도 1M·3M·6M·12M', [g(ix, 'r1'), g(ix, 'r3'), g(ix, 'r6'), g(ix, 'r12')].map(sgnp).join(' · ')]);
+  if (g(ix, 'atv') != null) kv.push(['20일 평균 거래대금', money(g(ix, 'atv'), krw)]);
+  if (etf && g(ix, 'aum') != null) kv.push(['순자산', money(g(ix, 'aum'), krw)]);
+  if (g(ix, 'sec')) kv.push([etf ? '자산군' : '섹터', secKo(g(ix, 'sec'))]);
+  if (g(ix, 'cat')) kv.push([etf ? '카테고리' : '업종', g(ix, 'cat')]);
+  if (g(ix, 'idx')) kv.push(['기초지수', g(ix, 'idx')]);
+  if (g(ix, 'ex') != null) kv.push(['총보수', num(g(ix, 'ex'), 2) + '%']);
+  if (g(ix, 'rk') == null) kv.push(['RS 순위', '순위표 밖(유니버스 밖이거나 가격 이력 부족)']);
+  return '<div class="kv">' + kv.map(function(x){ return '<span>' + esc(x[0]) + '</span><span class="num">' + esc(x[1]) + '</span>'; }).join('') + '</div>';
+}
+
+// ---------------------------------------------------------------- 화면
+function statusHtml(){
+  if (!STATUS) return '';
+  var same = STATUS.input_sig === mpSig(S.rows) || (!STATUS.input_sig && !S.rows.length);
+  return '<div class="card small">성과 계산: ' + (same ? '<span class="okc">저장된 구성까지 반영됨</span>' : '<span class="warn">새 구성 계산 대기</span> — 종목·비중·사유는 이미 사이트에 보이고, 추천가·종가·수익률은 다음 종가 게시(한국 16시대 · 미국 새벽 6시 전후) 때 채워집니다')
+    + ' <span class="mute">· 마지막 계산 ' + esc(STATUS.computed || '–') + (STATUS.last ? ' · 기준 ' + esc(STATUS.last) : '') + '</span>'
+    + (STATUS.errors && STATUS.errors.length ? '<ul class="dl err">' + STATUS.errors.map(function(e){ return '<li>' + esc(e) + '</li>'; }).join('') + '</ul>' : '') + '</div>';
+}
+function render(){
+  if (!S) return;
+  var h = '<div id="stat">' + statusHtml() + '</div>'
+    + '<div class="seg" role="group">' + [['mp', '모델 포트폴리오'], ['pick', '관심'], ['hist', '변경 기록'], ['set', '설정'], ['site', '사이트']].map(function(x){ return '<button type="button" data-view="' + x[0] + '" aria-pressed="' + (VIEW === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div>';
+  h += VIEW === 'mp' ? mpHtml() : VIEW === 'pick' ? watchHtml() : VIEW === 'hist' ? histHtml() : VIEW === 'site' ? siteHtml() : setHtml();
+  $('#root').innerHTML = h;
+}
+var TORD = {'한국주식': 0, '한국ETF': 1, '미국주식': 2, '미국ETF': 3, '암호화폐': 4, '달러': 5, '원화': 6, '기타': 7};
+function holdings(){
+  return comp().map(function(r){
+    var k = kOf(r), since = sinceOf(S, k), h = MPH[k];
+    return {r: r, k: k, since: since, ix: idxOf(r.type, r.code), h: h && h.since === since ? h : null, name: nameOf(r.type, r.code)};
+  }).sort(function(a, b){ return TORD[a.r.type] - TORD[b.r.type] || b.r.weight - a.r.weight || (a.name < b.name ? -1 : 1); });
+}
+function diffLines(prev, cur, exits, date){   // 이전 → 이번 적용일 변경(편입·편출·비중) — 원화 현금 줄은 변경으로 세지 않는다
+  var pw = {}, cw = {}, L = [], real = function(r){ return !isCashRow(r); };
+  cur = cur.filter(real);
+  (prev ? prev.rows.filter(real) : []).forEach(function(r){ pw[kOf(r)] = r; });
+  cur.forEach(function(r){ cw[kOf(r)] = r; });
+  cur.forEach(function(r){ var k = kOf(r), a = pw[k] ? cents(pw[k].weight) : 0, b = cents(r.weight);
+    if (!pw[k]) L.push({k: k, kind: prev ? '편입' : '시작', txt: pct(b) + '%', memo: r.memo || ''});
+    else if (a !== b) L.push({k: k, kind: '비중', txt: pct(a) + '% → ' + pct(b) + '%'}); });
+  Object.keys(pw).forEach(function(k){ if (!cw[k]) { var e = (exits || []).filter(function(x){ return x.date === date && x.type + '|' + x.code === k; })[0];
+    L.push({k: k, kind: '편출', txt: pct(cents(pw[k].weight)) + '% → 0%', memo: e ? e.memo : '', exit: !!e}); } });
+  return L;
+}
+function mpHtml(){
+  var H = holdings(), c = comp(), I = sumC(c), lv = latest(S), tv = todayVer(S), b = baseVer(S), t = today();
+  var fresh = !!MPDOC && MPDOC.input_sig === mpSig(S.rows);   // 계산본이 지금 구성으로 계산됐을 때만 '현재 비중'(가격 변동 반영)을 보인다
+  var h = '<div class="card"><div class="kpi"><span>보유 <b>' + H.length + '</b>종목</span><span>투자 <b class="num">' + pct(I) + '%</b></span><span>현금 <b class="num">' + pct(10000 - I) + '%</b></span>'
+    + '<span class="mute small">마지막 적용일 ' + esc(lv ? lv.date : '–') + '</span></div>'
+    + '<div class="acts"><button type="button" class="pri" data-act="add">+ 편입</button><button type="button" data-act="exit"' + (H.length ? '' : ' disabled') + '>− 편출</button><button type="button" data-act="wall"' + (H.length ? '' : ' disabled') + '>비중 조절</button></div>'
+    + '<p class="help">행동 하나가 곧 저장입니다. 오늘(' + t + ') 한 변경은 모두 오늘 적용일 하나로 합쳐지고, 저장하면 오늘 종가 기준으로 모든 종목이 표시된 목표 비중에 맞춰집니다. 추천가는 입력하지 않습니다 — 추천일 정규장 종가가 자동으로 들어갑니다.</p></div>';
+  if (tv) {
+    var D = diffLines(b, tv.rows, S.exits, t);
+    h += '<div class="card today small"><div class="vh"><b>오늘(' + t + ') 저장된 변경</b><span class="mute">' + (b ? b.date + ' 구성 대비' : '첫 구성') + '</span><span style="flex:1"></span>' + (b ? '<button type="button" class="dng" data-act="undo">오늘 변경사항 되돌리기</button>' : '<span class="mute">첫 구성이라 되돌리기 없음 — 편출·비중 조절로 고치세요</span>') + '</div>'
+      + (D.length ? '<ul class="dl">' + D.map(function(x){ return '<li>' + esc(x.kind) + ' ' + esc(nameOf(x.k.split('|')[0], x.k.split('|')[1])) + ' ' + esc(x.txt) + '</li>'; }).join('') + '</ul>' : '<p class="mute" style="margin:4px 0 0">목표 비중 재조정만(바뀐 비중 없음)</p>')
+      + '<p class="help">추천가·종가·수익률은 다음 종가 게시 때 채워집니다. ' + (b ? '오늘 안에는 되돌릴 수 있고, ' : '') + '내일부터는 잠깁니다.</p></div>';
+  }
+  if (!H.length) return h + '<div class="card mute">아직 구성이 없습니다. <b>+ 편입</b>으로 시작하세요.</div>';
+  h += '<div class="card"><div class="hl hd"><span>종목</span><span>추천일</span><span class="r">추천가</span><span class="r" title="기준일 정규장 종가">종가</span><span class="r">수익률</span><span class="r">RS 순위</span><span class="r">Score</span><span class="r">비중</span><span></span></div>';
+  H.forEach(function(o){
+    var r = o.r, hh = o.h, ccy = hh ? (hh.pccy || hh.ccy) : null, p0 = hh ? pxf(hh.px0, ccy) : null, p1 = hh ? pxf(hh.px1, ccy) : null;
+    var ret = hh && hh.pret != null ? '<span class="' + (hh.pret > 0 ? 'pos' : hh.pret < 0 ? 'neg' : '') + '">' + sgn(hh.pret, 2) + '%</span>' : '<span class="mute">–</span>';
+    var wait = '<span class="mute" title="추천일 정규장 종가로 자동 기록 — 다음 종가 게시 때">대기</span>';
+    h += '<div class="hl">'
+      + '<div class="c-nm"><div class="nmr">' + starBtn(r.type, r.code) + '<b data-act="det" data-k="' + esc(o.k) + '">' + esc(o.name) + '</b></div><span class="sub">' + esc(r.code) + ' · <span class="chip">' + esc(r.type) + '</span>' + markHtml(r.type, r.code) + '</span></div>'
+      + '<span class="c-d num" data-l="추천일">' + esc(o.since || '–') + '</span>'
+      + '<span class="c-p0 r num" data-l="추천가">' + (p0 || wait) + '</span>'
+      + '<span class="c-p1 r num" data-l="종가">' + (p1 ? p1 + (hh.pdate ? '<span class="mute small"> ' + esc(hh.pdate.slice(5)) + '</span>' : '') : '–') + '</span>'
+      + '<span class="c-ret r num" data-l="수익률">' + ret + '</span>'
+      + '<span class="c-rk r num" data-l="RS 순위">' + (rsShort(o.ix) || '<span class="mute">밖</span>') + '</span>'
+      + '<span class="c-sc r num" data-l="Score">' + (o.ix && g(o.ix, 'sc') != null ? num(g(o.ix, 'sc'), 1) : '–') + '</span>'
+      + '<span class="c-w r num"><b>' + pct(cents(r.weight)) + '%</b>' + (hh && fresh && Math.abs(hh.w_now - r.weight) >= 0.05 ? '<br><span class="mute small" title="가격 변동 반영 현재 비중">현재 ' + num(hh.w_now, 1) + '%</span>' : '') + '</span>'
+      + '<span class="c-a"><button type="button" data-act="w1" data-k="' + esc(o.k) + '">비중 조절</button><button type="button" class="dng" data-act="exit" data-k="' + esc(o.k) + '">편출</button><button type="button" data-act="det" data-k="' + esc(o.k) + '" aria-label="상세">' + (OPEN[o.k] ? '접기' : '상세') + '</button></span>';
+    if (OPEN[o.k]) h += '<div class="det"><div class="kv"><span>추천사유</span><span class="memo">' + (r.memo ? esc(r.memo) : '<span class="warn">없음</span>') + '</span>'
+      + (hh && hh.pdate ? '<span>가격 기준</span><span>추천가 = ' + esc(o.since) + ' 정규장 종가(휴장이면 직전) · 종가 = ' + esc(hh.pdate) + '</span>' : '<span>가격</span><span>추천일 종가 대기 — 다음 종가 게시 때 자동 기록</span>')
+      + '</div>' + (o.ix ? '<div style="margin-top:8px">' + detailKv(o.ix) + '</div>' : '<p class="mute" style="margin:8px 0 0">검색 목록에 없는 코드 — RS 자료 없음</p>')
+      + '<div style="margin-top:8px"><button type="button" data-act="memo" data-k="' + esc(o.k) + '" data-d="' + esc(o.since) + '">사유·표시 이름 수정</button></div></div>';
+    h += '</div>';
+  });
+  return h + '<p class="help">RS 순위·Score = 사이트 주식·ETF 탭과 같은 값(' + (IDX ? '한국 ' + esc(IDX.asof.korea || '–') + ' · 미국 ' + esc(IDX.asof.us || '–') : '검색 목록 없음') + '). 종가 옆 날짜 = 가격 기준일.</p></div>';
+}
+// 관심(D-16) — ☆ 하나로 담고 뺀다. 주식 → watch(사이트 주식 › 관심), ETF → picks(사이트 ETF › 관심). 저장 = 즉시 공개
+var WB = {q: '', tab: 'rs', mk: 'KS'};   // 관심 화면의 찾기 상태
+function wlOf(type){ return type === '한국ETF' || type === '미국ETF' ? 'picks' : 'watch'; }
+function wType(L, p){ return (p.market === '미국' ? '미국' : '한국') + (L === 'picks' ? 'ETF' : '주식'); }
+function starSet(){ var h = {}; ['watch', 'picks'].forEach(function(L){ S[L].forEach(function(p){ h[wType(L, p) + '|' + p.code] = 1; }); }); return h; }
+function starBtn(type, code, on){   // 한국·미국 주식·ETF만(현금·암호화폐·기타는 관심 목록이 없음)
+  if (!K2T[type]) return '';
+  if (on == null) on = !!starSet()[type + '|' + code];
+  var t = on ? '관심에서 빼기' : '관심에 담기 — 사이트에 공개';
+  return '<button type="button" class="star" data-act="star" data-k="' + esc(type + '|' + code) + '" aria-pressed="' + on + '" title="' + t + '" aria-label="' + t + '">' + (on ? '★' : '☆') + '</button>';
+}
+function toggleStar(k){
+  var t = k.split('|')[0], code = k.slice(t.length + 1), L = wlOf(t), mk = t.indexOf('미국') === 0 ? '미국' : '한국', N = clone(S), i = -1, nm = nameOf(t, code);
+  N[L].forEach(function(p, j){ if (p.market === mk && p.code === code) i = j; });
+  if (i >= 0 && N[L][i].memo && !confirm(nm + '의 관심 메모도 같이 지워집니다. 뺄까요?')) return;
+  if (i >= 0) N[L].splice(i, 1); else N[L].push({market: mk, code: code});
+  var P = null;   // 관심에서 빼면 관심일 때 건 손절가·지정가는 기록으로만(다시 담아도 자동으로 안 씀) — 같은 저장으로
+  if (i >= 0 && PV && markOf(k) && !heldIn(S, k)) { P = clone(PV); (P.marks[k] = P.marks[k] || []).push({set: today(), since: null, off: 1}); }
+  saveAll(N, P, (i >= 0 ? '관심에서 뺌 — ' : '관심에 담음(사이트 공개) — ') + nm).catch(function(x){ toast(x.message, true); });
+}
+function mpW(){ var w = {}; comp().forEach(function(r){ w[kOf(r)] = cents(r.weight); }); return w; }   // 지금 MP 목표 비중(센트)
+function wRow(L, p, i, W){
+  var t = wType(L, p), k = t + '|' + p.code, ix = idxOf(t, p.code), n = S[L].length;
+  return '<div class="wl"><span class="w-s">' + starBtn(t, p.code, true) + '</span>'
+    + '<div class="w-n"><b>' + esc(nameOf(t, p.code)) + '</b><span class="sub">' + esc(p.code) + ' · <span class="chip">' + t + '</span>' + (p.memo ? ' · ' + esc(p.memo) : '') + markHtml(t, p.code) + '</span></div>'
+    + '<span class="small num w-r">' + (ix && g(ix, 'rk') != null ? rsShort(ix) + ' · Score ' + num(g(ix, 'sc'), 1) + ' · ' + esc(g(ix, 'lb') || '') : '<span class="mute">순위표 밖</span>') + '</span>'
+    + '<span class="w-m">' + (W[k] ? '<span class="mpin" title="모델 포트폴리오 목표 비중">MP ' + pct(W[k]) + '%</span>' : '<button type="button" data-act="wmp" data-k="' + esc(k) + '" title="이 종목을 고른 채로 편입 창을 엽니다">MP 편입</button>') + '</span>'
+    + '<span class="c-a"><button type="button" data-act="wup" data-l="' + L + '" data-i="' + i + '"' + (i ? '' : ' disabled') + ' aria-label="위로">↑</button><button type="button" data-act="wdn" data-l="' + L + '" data-i="' + i + '"' + (i < n - 1 ? '' : ' disabled') + ' aria-label="아래로">↓</button>'
+    + '<button type="button" data-act="wmemo" data-l="' + L + '" data-i="' + i + '">메모</button></span></div>';
+}
+function wItem(r, S1, W){   // 찾기 · 순위 목록 한 줄
+  var t = T2K[r[0]], k = t + '|' + r[1], rk = g(r, 'rk');
+  return '<div class="wi">' + starBtn(t, r[1], !!S1[k])
+    + '<div style="min-width:0"><div class="m1">' + esc(r[2]) + '</div><div class="m2">' + esc(r[1]) + ' · ' + t + (g(r, 'lb') ? ' · ' + esc(g(r, 'lb')) : '') + (g(r, 'ac') != null ? ' · Accel ' + sgn(g(r, 'ac')) : '') + '</div></div>'
+    + '<div class="rk">' + (rk != null ? '<span class="num">' + rsShort(r) + ' · Score ' + num(g(r, 'sc'), 1) + '</span>' : '<span class="mute">순위표 밖</span>') + (W[k] ? '<br><span class="mpin">MP ' + pct(W[k]) + '%</span>' : '') + '</div></div>';
+}
+function wresHtml(){   // 검색 결과 — 입력할 때마다 이 부분만 다시 그린다(휴대폰 키보드 유지)
+  var q = WB.q.trim(); if (!q) return '';
+  if (!IDX) return '<p class="warn small">검색 목록(data/search.json)을 불러오지 못했습니다.</p>';
+  var S1 = starSet(), W = mpW(), a = search(q).slice(0, 30), h = a.map(function(r){ return wItem(r, S1, W); }).join('');
+  if (!a.some(function(r){ return r[1] === q.toUpperCase(); }) && /^[A-Za-z0-9.\-]{1,12}$/.test(q)) {
+    var qu = q.toUpperCase(), kr = /^[0-9][0-9A-Z]{5}$/.test(qu);
+    h += '<div class="direct">목록에 없는 코드 <b>' + esc(qu) + '</b> — 구분을 골라 담기(사이트에는 순위 없음으로 표시):<br>'
+      + (kr ? ['한국주식', '한국ETF'] : ['미국주식', '미국ETF']).map(function(t){ var c = normCode(t, qu), on = !!S1[t + '|' + c];
+          return '<button type="button" data-act="star" data-k="' + esc(t + '|' + c) + '">' + (on ? '★ ' : '☆ ') + t + '</button>'; }).join('') + '</div>';
+  } else if (!a.length) h += '<p class="mute small" style="margin:8px 0 0">검색 결과 없음</p>';
+  return h;
+}
+function wtopHtml(){
+  var S1 = starSet(), W = mpW();
+  return '<div class="seg" role="group">' + [['rs', 'RS 상위'], ['ac', 'Accel 상위']].map(function(x){ return '<button type="button" data-act="wtab" data-v="' + x[0] + '" aria-pressed="' + (WB.tab === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div>'
+    + '<div class="chips">' + ['KS', 'US', 'KE', 'UE'].map(function(m){ return '<button type="button" data-act="wmk" data-v="' + m + '" aria-pressed="' + (WB.mk === m) + '">' + T2K[m] + '</button>'; }).join('') + '</div>'
+    + (IDX ? '<p class="help" style="margin:0 0 4px">' + (WB.tab === 'ac' ? 'Accel(최근 가속) 큰 순 50개' : 'RS 순위 1~50위') + ' · ' + esc(IDX.asof[MKT[WB.mk]] || '') + ' 종가 기준 — 사이트 순위표와 같은 값</p>'
+      + topList(WB.mk, WB.tab).map(function(r){ return wItem(r, S1, W); }).join('') : '<p class="warn small">검색 목록을 불러오지 못했습니다.</p>');
+}
+function watchHtml(){
+  var W = mpW(), h = '<div class="card"><div class="vh"><h2 style="margin:0;flex:1">관심</h2><span class="mute small">종목 ' + S.watch.length + ' · ETF ' + S.picks.length + '</span></div>'
+    + '<p class="help" style="margin:0 0 8px">☆를 누르면 바로 담기고(★) 다시 누르면 빠집니다. 저장 즉시 사이트 <b>주식 › 관심</b> · <b>ETF › 관심</b>에 공개됩니다. 모델 포트폴리오 표의 ☆도 같은 목록입니다.</p>'
+    + '<input type="search" data-wq value="' + esc(WB.q) + '" placeholder="종목·ETF 이름 또는 코드 — 삼성, 005930, QQQ, NVDA" autocomplete="off" autocapitalize="characters" spellcheck="false">'
+    + '<div id="wres">' + wresHtml() + '</div></div>';
+  [['watch', '관심 종목', '주식'], ['picks', '관심 ETF', 'ETF']].forEach(function(x){
+    h += '<div class="card"><div class="vh"><h2 style="margin:0;flex:1">' + x[1] + ' <span class="mute small">' + S[x[0]].length + '개</span></h2><span class="mute small">사이트 ' + x[2] + ' › 관심 · 이 순서대로</span></div>'
+      + (S[x[0]].length ? S[x[0]].map(function(p, i){ return wRow(x[0], p, i, W); }).join('') : '<p class="mute" style="margin:6px 0 0">아직 없습니다. 위에서 찾거나 아래 순위에서 ☆를 누르세요.</p>') + '</div>';
+  });
+  return h + '<div class="card"><h2>순위에서 골라 담기</h2><div id="wtop">' + wtopHtml() + '</div></div>'
+    + '<p class="help">MP x% = 지금 모델 포트폴리오 목표 비중. <b>MP 편입</b> = 그 종목을 고른 채로 편입 창(비중 배분 단계)이 열립니다 — 이후는 + 편입과 같습니다.</p>';
+}
+function histHtml(){
+  var vs = vers(S), t = today();
+  if (!vs.length) return '<div class="card mute">기록이 없습니다.</div>';
+  var h = '<div class="card small"><b>과거 기록은 잠겨 있습니다.</b> 오늘 이전 적용일의 종목·비중·추천일·추천가는 바꿀 수 없고, 추천사유·편출사유 문구만 오탈자·설명 보완용으로 고칠 수 있습니다.</div>';
+  vs.slice().reverse().forEach(function(v){
+    var i = vs.indexOf(v), prev = i ? vs[i - 1] : null, D = diffLines(prev, v.rows, S.exits, v.date), vr = v.rows.filter(function(r){ return !isCashRow(r); });
+    h += '<div class="card' + (v.date === t ? ' today' : '') + '"><div class="vh"><b>' + esc(v.date) + '</b><span class="mute small">' + vr.length + '종목 · 현금 ' + pct(10000 - sumC(vr)) + '%</span><span style="flex:1"></span>'
+      + (v.date === t ? '<span class="chip">오늘 · 수정 가능</span>' : '<span class="lock">잠김</span>') + '</div>'
+      + (D.length ? '<ul class="dl">' + D.map(function(x){
+          var tp = x.k.split('|')[0], cd = x.k.split('|')[1];
+          var ed = x.kind === '편입' || x.kind === '시작' ? ' <button type="button" class="lnk" data-act="memo" data-k="' + esc(x.k) + '" data-d="' + esc(v.date) + '">사유 수정</button>'
+                 : x.kind === '편출' ? ' <button type="button" class="lnk" data-act="xmemo" data-k="' + esc(x.k) + '" data-d="' + esc(v.date) + '">사유 ' + (x.exit ? '수정' : '추가') + '</button>' : '';
+          return '<li><b>' + esc(x.kind) + '</b> ' + esc(nameOf(tp, cd)) + ' <span class="mute">' + esc(cd) + '</span> ' + esc(x.txt) + ed
+            + (x.memo ? '<div class="mute memo">사유: ' + esc(x.memo) + '</div>' : ''); }).join('') + '</ul>'
+        : '<p class="mute" style="margin:0">목표 비중 재조정(바뀐 비중 없음)</p>') + '</div>';
+  });
+  return h;
+}
+function setHtml(){
+  var s = SET || (SET = clone(S.settings));
+  return '<div class="card"><h2>MP 설정</h2>'
+    + '<label class="small mute">제목<input data-k="sn" value="' + esc(s.name) + '" placeholder="모델 포트폴리오"></label>'
+    + '<label class="small mute" style="display:block;margin-top:10px">소개(사이트 제목 아래 한두 줄)<textarea data-k="si">' + esc(s.intro) + '</textarea></label>'
+    + '<label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" data-k="sv" style="width:auto"' + (s.visible ? ' checked' : '') + '> 사이트에 MP 탭 공개</label>'
+    + '<p class="help">끄면 방문자 화면에서 MP 탭이 사라집니다(구성·이력은 그대로 보관).</p>'
+    + '<div style="margin-top:10px"><button type="button" class="pri" data-act="ssave">설정 저장</button></div></div>';
+}
+
+// ---------------------------------------------------------------- 창(모달) — 편입 · 편출 · 비중 조절 · 사유 · 관심 메모
+var MS = null;   // 창 상태
+function mState(){ return JSON.stringify([MS.memo || {}, (MS.sel || []).map(function(x){ return x.key || x; }), MS.ws || {}, MS.val || '', MS.name || '']); }
+function mOpen(o){ MS = o; MS._0 = mState(); $('#modal').hidden = false; document.body.style.overflow = 'hidden'; mRender(); var f = $('#mb [autofocus]'); if (f) f.focus(); }
+function mClose(force){ if (!force && mDirty() && !confirm('입력한 내용이 사라집니다. 닫을까요?')) return; MS = null; $('#modal').hidden = true; document.body.style.overflow = ''; }
+function mDirty(){ return !!MS && mState() !== MS._0; }
+$('#mx').onclick = function(){ mClose(); };
+$('#modal').addEventListener('mousedown', function(e){ if (e.target.id === 'modal') mClose(); });
+document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && MS) mClose(); });
+function mRender(){
+  var o = MODAL[MS.kind](); $('#mt').textContent = o.title; $('#mb').innerHTML = o.body; $('#mf').innerHTML = o.foot;
+  document.querySelectorAll('#mb textarea').forEach(function(t){ t.style.height = 'auto'; t.style.height = (t.scrollHeight + 2) + 'px'; });
+}
+function mSoft(parts){   // 입력 중에는 입력칸을 다시 만들지 않고 계산 결과·아래 줄만 바꾼다(휴대폰 키보드 유지)
+  var o = MODAL[MS.kind]();
+  (parts || []).forEach(function(id){ var el = $('#' + id); if (el && o[id] != null) el.innerHTML = o[id]; });
+  $('#mf').innerHTML = o.foot;
+}
+function footHtml(st, btns){ return '<div class="st">' + st + '</div>' + btns; }
+function totHtml(nc, extra){ var I = sumC(nc); return '<span class="tot">종목 <b class="num">' + pct(I) + '%</b> + 현금 <b class="num">' + pct(10000 - I) + '%</b> = <b class="num">100.00%</b>' + (extra || '') + '</span>'; }
+function errLine(e){ return e ? '<div class="err small">' + esc(e) + '</div>' : ''; }
+function cntHtml(v){ var n = String(v || '').length; return '<span class="' + (n > MEMO_MAX ? 'err' : '') + '">' + n + '/' + MEMO_MAX + '</span>'; }
+function saveFrom(btn, N, msg){
+  var b = $(btn); if (b) b.disabled = true;
+  MS.err = null;
+  persist(N, msg).then(function(){ mClose(true); }, function(x){ if (!MS) return; MS.err = x.message; mRender(); });
+}
+
+// 검색 · 목록 (편입 창과 관심 화면이 같이 쓴다)
+function itemOf(r){ return {key: T2K[r[0]] + '|' + r[1], type: T2K[r[0]], code: r[1], name: r[2], r: r}; }
+function search(q, only){
+  q = q.trim(); if (!q || !IDX) return [];
+  var ql = q.toLowerCase(), qu = q.toUpperCase(), out = [];
+  IDX.rows.forEach(function(r){
+    if (only && only.indexOf(r[0]) < 0) return;
+    var c = r[1], n = String(r[2]).toLowerCase(), s;
+    if (c === qu) s = 0; else if (n === ql) s = 0.5; else if (c.indexOf(qu) === 0) s = 1; else if (n.indexOf(ql) === 0) s = 2; else if (n.indexOf(ql) >= 0) s = 3; else return;
+    if (s >= 1 && (r[0] === 'KE' || r[0] === 'UE')) s += 10;   // 코드·이름이 정확히 같은 것 다음은 주식 먼저, ETF는 그 뒤(예: '하이닉스' → SK하이닉스 먼저)
+    var rk = g(r, 'rk');
+    out.push([s, rk == null ? 1e6 : rk, r]);
+  });
+  out.sort(function(a, b){ return a[0] - b[0] || a[1] - b[1] || a[2][2].length - b[2][2].length; });
+  return out.slice(0, 60).map(function(x){ return x[2]; });
+}
+function topList(tk, by){
+  if (!IDX) return [];
+  var a = IDX.rows.filter(function(r){ return r[0] === tk && g(r, 'rk') != null && (by !== 'ac' || g(r, 'ac') != null); });
+  a.sort(by === 'ac' ? function(x, y){ return g(y, 'ac') - g(x, 'ac') || g(x, 'rk') - g(y, 'rk'); } : function(x, y){ return g(x, 'rk') - g(y, 'rk'); });
+  return a.slice(0, 50);
+}
+function heldKeys(){ var h = {}; comp().forEach(function(r){ h[kOf(r)] = '보유 중'; }); return h; }
+function isSel(k){ return MS.sel.some(function(x){ return x.key === k; }); }
+function itemHtml(it, held){
+  var r = it.r, k = it.key, dis = !!held[k], sel = isSel(k), open = MS.open[k];
+  var right = r ? (g(r, 'rk') != null ? '<span class="num">' + rsShort(r) + '<br>Score ' + num(g(r, 'sc'), 1) + '</span>' : '<span class="mute">순위표 밖</span>') : '<span class="mute">목록 밖</span>';
+  var sub = esc(it.code) + ' · ' + esc(it.type) + (r && g(r, 'lb') ? ' · ' + esc(g(r, 'lb')) : '') + (r && g(r, 'ac') != null ? ' · Accel ' + sgn(g(r, 'ac')) : '') + (dis ? ' · <b>' + held[k] + '</b>' : '');
+  return '<div class="it" data-it="' + esc(k) + '"' + (dis ? ' aria-disabled="true"' : '') + '>'
+    + '<input type="checkbox" tabindex="-1"' + (sel || dis ? ' checked' : '') + (dis ? ' disabled' : '') + ' aria-label="' + esc(it.name) + ' 선택">'
+    + '<div style="min-width:0"><div class="m1">' + esc(it.name) + '</div><div class="m2">' + sub + '</div></div>'
+    + '<div class="rk">' + right + (r ? '<br><button type="button" class="lnk" data-more="' + esc(k) + '">' + (open ? '접기' : '상세') + '</button>' : '') + '</div>'
+    + (open && r ? '<div class="more">' + detailKv(r) + '</div>' : '') + '</div>';
+}
+var LISTED = {};   // 지금 목록에 보이는 항목(key → item)
+function listHtml(){
+  var held = heldKeys(), items = [], q = (MS.q || '').trim(), h = '';
+  if (MS.sel.length) h += '<div class="selbar">' + MS.sel.map(function(x){ return '<button type="button" data-unsel="' + esc(x.key) + '" aria-label="선택 해제">' + esc(x.name) + ' ✕</button>'; }).join('') + '</div>';
+  if (!IDX) h += '<p class="warn small">검색 목록(data/search.json)을 불러오지 못했습니다 — 코드를 입력하면 직접 추가할 수 있습니다.</p>';
+  if (q) {
+    items = search(q).map(itemOf);
+    if (/^(달러|usd|현금|dollar)$/i.test(q)) items.unshift({key: '달러|USD', type: '달러', code: 'USD', name: '달러 현금', r: null});
+  } else {
+    var tabs = [['rs', 'RS 상위'], ['ac', 'Accel 상위'], ['pk', '관심']];
+    h += '<div class="seg" role="group" style="margin-top:4px">' + tabs.map(function(x){ return '<button type="button" data-tab="' + x[0] + '" aria-pressed="' + (MS.tab === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div>';
+    if (MS.tab === 'pk') items = ['watch', 'picks'].reduce(function(a, L){ return a.concat(S[L].map(function(p){ var t = wType(L, p), r = idxOf(t, p.code); return r ? itemOf(r) : {key: t + '|' + p.code, type: t, code: p.code, name: p.code, r: null}; })); }, []);
+    else {
+      var mks = ['KS', 'US', 'KE', 'UE'];
+      if (mks.indexOf(MS.mk) < 0) MS.mk = mks[0];
+      h += '<div class="chips">' + mks.map(function(m){ return '<button type="button" data-mk="' + m + '" aria-pressed="' + (MS.mk === m) + '">' + T2K[m] + '</button>'; }).join('') + '</div>';
+      items = topList(MS.mk, MS.tab).map(itemOf);
+      h += '<p class="help" style="margin:0 0 4px">' + (MS.tab === 'ac' ? 'Accel(최근 가속) 큰 순 50개 — 사이트 순위표의 Accel 값' : 'RS 순위 1~50위 — 사이트 순위표와 같은 순위') + (IDX ? ' · ' + esc(IDX.asof[MKT[MS.mk]] || '') + ' 종가 기준' : '') + '</p>';
+    }
+  }
+  LISTED = {}; items.forEach(function(it){ LISTED[it.key] = it; });
+  h += items.map(function(it){ return itemHtml(it, held); }).join('');
+  if (q && !items.some(function(it){ return it.code === q.toUpperCase(); }) && /^[A-Za-z0-9.\-]{1,12}$/.test(q)) {
+    var qu = q.toUpperCase(), kr = /^[0-9][0-9A-Z]{5}$/.test(qu);
+    var opts = kr ? ['한국주식', '한국ETF'] : ['미국주식', '미국ETF', '암호화폐', '기타'];
+    h += '<div class="direct">목록에 없는 코드 <b>' + esc(qu) + '</b> — 구분을 골라 추가(RS 자료 없음, 가격은 계산 때 확인):<br>'
+      + opts.map(function(t){ return '<button type="button" data-direct="' + esc(t) + '">' + esc(t) + (t === '암호화폐' ? '(바이낸스 USDT)' : t === '기타' ? '(yfinance 티커)' : '') + '</button>'; }).join('') + '</div>';
+  } else if (q && !items.length) h += '<p class="mute">검색 결과 없음</p>';
+  return h;
+}
+function stepSearch(title, nextLabel){
+  var L = listHtml();
+  return {title: title,
+    body: '<input type="search" data-in="q" value="' + esc(MS.q || '') + '" placeholder="종목명 또는 코드 — 삼성, 005930, QQQ, NVDA" autocomplete="off" autocapitalize="characters" spellcheck="false" autofocus>'
+      + '<div id="mlist">' + L + '</div>',
+    mlist: L,
+    foot: footHtml(errLine(MS.err) + '<b>' + MS.sel.length + '</b>개 선택', '<button type="button" data-close>취소</button><button type="button" class="pri" data-go="2"' + (MS.sel.length ? '' : ' disabled') + '>' + nextLabel + '</button>')};
+}
+
+// 편입: 1 선택 → 2 비중 배분 → 3 추천사유·저장
+function addProposal(){
+  var c0 = comp(), I = sumC(c0), C = 10000 - I, n = MS.sel.length, m = c0.length, nc = c0.map(clone), nw, err = null;
+  if (!MS.mode) return {nc: nc, nw: MS.sel.map(function(){ return 0; }), c0: c0, I: I, C: C, err: '배분 방식을 고르세요', none: true};
+  if (MS.mode === 'cash') {
+    var amt = MS.amt == null ? C : cents(MS.amt);
+    if (amt > C) err = '배분할 비중이 현금(' + pct(C) + '%)보다 큽니다';
+    else if (amt < n) err = '배분할 비중이 너무 작습니다';
+    nw = alloc(Math.max(0, Math.min(amt, C)), MS.sel.map(function(){ return 1; }));
+  } else if (MS.mode === 'prop') {
+    var per = MS.amt == null ? Math.floor(10000 / (m + n)) : cents(MS.amt);
+    nw = MS.sel.map(function(){ return per; });
+  } else {
+    var tot = MS.amt == null ? 10000 : cents(MS.amt);
+    if (tot > 10000) err = '전체 투자 비중은 100% 이하';
+    var all = alloc(Math.min(tot, 10000), c0.map(function(){ return 1; }).concat(MS.sel.map(function(){ return 1; })));
+    nc.forEach(function(r, i){ r.weight = all[i] / 100; });
+    nw = all.slice(m);
+  }
+  MS.sel.forEach(function(it, i){ var v = MS.ws[it.key]; if (v != null && String(v).trim() !== '') nw[i] = isFinite(Number(v)) ? cents(v) : NaN; });
+  if (MS.mode === 'prop') {
+    var X = nw.reduce(function(a, b){ return a + (isFinite(b) ? b : 0); }, 0);
+    if (X >= I) err = '신규 비중 합(' + pct(X) + '%)이 기존 투자 비중(' + pct(I) + '%)보다 커서 비례 축소할 수 없습니다';
+    else { var sc = alloc(I - X, c0.map(function(r){ return cents(r.weight); })); nc.forEach(function(r, i){ r.weight = sc[i] / 100; }); }
+  }
+  MS.sel.forEach(function(it, i){
+    if (!err && !(nw[i] > 0)) err = it.name + ': 비중은 0보다 커야 합니다';
+    if (!err && MS.ws[it.key] != null && Math.abs(Number(MS.ws[it.key]) * 100 - cents(MS.ws[it.key])) > 1e-6) err = it.name + ': 비중은 소수 둘째 자리까지';
+    nc.push({type: it.type, code: it.code, name: '', weight: (nw[i] || 0) / 100, memo: String(MS.memo[it.key] || '').trim()});
+  });
+  if (!err) err = compErr(nc);
+  return {nc: nc, nw: nw, c0: c0, I: I, C: C, err: err};
+}
+function newWHtml(P){
+  if (P.none) return '<p class="mute small" style="margin:4px 0">배분 방식을 고르면 계산됩니다. 고르기 전에는 어떤 종목 비중도 바뀌지 않습니다.</p>';
+  return MS.sel.map(function(it, i){
+    var v = MS.ws[it.key] != null ? MS.ws[it.key] : pct(P.nw[i] || 0);
+    return '<div class="nw"><div style="min-width:0"><b>' + esc(it.name) + '</b> <span class="mute small">' + esc(it.code) + ' · ' + esc(it.type) + '</span></div>'
+      + '<span class="wbox"><input data-in="w:' + esc(it.key) + '" inputmode="decimal" value="' + esc(v) + '" aria-label="' + esc(it.name) + ' 비중"><span>%</span></span></div>';
+  }).join('');
+}
+function exChgHtml(P){
+  if (MS.mode === 'cash' || !P.c0.length) return '';
+  var L = P.c0.map(function(r, i){ var a = cents(r.weight), b = cents(P.nc[i].weight); return a === b ? '' : '<li>' + esc(nameOf(r.type, r.code)) + ' ' + pct(a) + '% → ' + pct(b) + '%</li>'; }).filter(Boolean);
+  return L.length ? '<details><summary>기존 종목 비중 변화 ' + L.length + '개</summary><ul class="dl small">' + L.join('') + '</ul></details>' : '';
+}
+var MODAL = {};
+MODAL.add = function(){
+  if (MS.step === 1) return stepSearch('편입 — 종목 선택', '선택 종목 검토 →');
+  var P = addProposal(), t = today();
+  if (MS.step === 2) {
+    var opt = function(id, label, desc, inp, dis){
+      return '<label class="opt" data-on="' + (MS.mode === id) + '"><input type="radio" name="md" data-mode="' + id + '"' + (MS.mode === id ? ' checked' : '') + (dis ? ' disabled' : '') + '><b>' + label + '</b> <span class="mute small">' + desc + '</span>'
+        + (MS.mode === id && inp ? '<div class="in">' + inp + '</div>' : '') + '</label>';
+    };
+    var amtIn = function(lbl, def){ return lbl + ' <span class="wbox"><input data-in="amt" inputmode="decimal" value="' + esc(MS.amt != null ? MS.amt : def) + '"><span>%</span></span>'; };
+    return {title: '편입 — 비중 배분',
+      body: '<p class="small" style="margin:0 0 4px">편입 <b>' + MS.sel.length + '</b>종목 · 추천일 <b>' + t + '</b>(오늘, 모두 같음) · 추천가 = 추천일 정규장 종가(자동)</p>'
+        + '<p class="small mute" style="margin:0 0 10px">현재 보유 ' + P.c0.length + '종목 · 투자 ' + pct(P.I) + '% · 현금 ' + pct(P.C) + '%</p>'
+        + opt('cash', '현금에서 배분', '기존 종목은 그대로', amtIn('배분할 비중', pct(P.C)) + ' <span class="mute">현금 ' + pct(P.C) + '% 안에서 똑같이 나눔</span>', P.C < MS.sel.length)
+        + opt('prop', '기존 종목 비례 축소', '현금은 그대로', amtIn('신규 종목당', pct(Math.floor(10000 / (P.c0.length + MS.sel.length)))) + ' <span class="mute">그만큼 기존 종목을 비중대로 줄임</span>', !P.c0.length)
+        + opt('eq', '동일 비중', '기존·신규 모두 같은 비중', amtIn('전체 투자 비중', '100.00') + ' <span class="mute">' + (P.c0.length + MS.sel.length) + '종목에 똑같이</span>')
+        + '<div class="small mute" style="margin:10px 0 2px">신규 종목 비중(직접 고칠 수 있음)</div><div id="mnew">' + newWHtml(P) + '</div>'
+        + '<div id="mcalc">' + exChgHtml(P) + '</div>',
+      mnew: newWHtml(P), mcalc: exChgHtml(P),
+      foot: footHtml(errLine(P.err) + totHtml(P.nc), '<button type="button" data-go="1">← 이전</button><button type="button" class="pri" data-go="3"' + (P.err ? ' disabled' : '') + '>다음 →</button>')};
+  }
+  var miss = MS.sel.filter(function(it){ var v = String(MS.memo[it.key] || '').trim(); return !v || v.length > MEMO_MAX; }).length;
+  return {title: '편입 — 추천사유 · 저장',
+    body: '<p class="small" style="margin:0 0 10px">추천일 <b>' + t + '</b> · 추천가는 입력하지 않습니다(추천일 정규장 종가, 다음 종가 게시 때 자동 기록 후 고정). 추천사유는 사이트에 공개됩니다 — 직접 쓰세요.</p>'
+      + MS.sel.map(function(it, i){
+          return '<div class="rs"><div class="vh"><b>' + esc(it.name) + '</b><span class="mute small">' + esc(it.code) + ' · ' + esc(it.type) + '</span><span style="flex:1"></span><b class="num">' + pct(P.nw[i] || 0) + '%</b></div>'
+            + '<textarea data-in="m:' + esc(it.key) + '" rows="2" maxlength="' + (MEMO_MAX + 50) + '" placeholder="추천사유 (필수, ' + MEMO_MAX + '자 이내)"' + (i ? '' : ' autofocus') + '>' + esc(MS.memo[it.key] || '') + '</textarea>'
+            + '<div class="cnt" id="cnt' + i + '">' + cntHtml(MS.memo[it.key]) + '</div></div>'; }).join('')
+      + exChgHtml(P),
+    foot: footHtml(errLine(MS.err || P.err) + totHtml(P.nc) + (miss ? '<div class="warn small">추천사유 ' + miss + '개 남음</div>' : ''),
+      '<button type="button" data-go="2">← 이전</button><button type="button" class="pri" id="msave" data-save="add"' + (miss || P.err ? ' disabled' : '') + '>저장</button>')};
+};
+function saveAdd(){
+  var P = addProposal(); if (P.err) return;
+  var N = withToday(S, P.nc, null);
+  saveFrom('#msave', N, '편입 저장됨 — ' + MS.sel.map(function(x){ return x.name; }).join(', ') + ' (추천가는 추천일 종가로 자동 기록)');
+}
+
+// 편출
+function exitProposal(){
+  var c0 = comp(), keep = c0.filter(function(r){ return MS.sel.indexOf(kOf(r)) < 0; }), I = sumC(c0), freed = I - sumC(keep), nc = keep.map(clone), err = null;
+  if (MS.mode === 'prop' && keep.length) { var a = alloc(I, keep.map(function(r){ return cents(r.weight); })); nc.forEach(function(r, i){ r.weight = a[i] / 100; }); }
+  if (!MS.sel.length) err = '편출할 종목을 고르세요';
+  return {c0: c0, nc: nc, freed: freed, err: err || compErr(nc)};
+}
+MODAL.exit = function(){
+  var P = exitProposal(), t = today(), b = baseVer(S), inBase = {}; (b ? b.rows : []).forEach(function(r){ inBase[kOf(r)] = 1; });
+  var body = '<p class="small" style="margin:0 0 10px">편출일 <b>' + t + '</b>(오늘) · 삭제가 아닙니다 — 과거 편입 기록은 그대로 남고, 오늘부터 구성에서만 빠집니다.</p>';
+  if (MS.pickList) body += '<div class="small mute" style="margin:0 0 4px">편출할 종목</div>' + P.c0.map(function(r){ var k = kOf(r);
+      return '<label class="opt" data-on="' + (MS.sel.indexOf(k) >= 0) + '" style="padding:8px 10px"><input type="checkbox" data-xsel="' + esc(k) + '" style="width:auto;margin-right:6px"' + (MS.sel.indexOf(k) >= 0 ? ' checked' : '') + '>'
+        + esc(nameOf(r.type, r.code)) + ' <span class="mute small">' + esc(r.code) + ' · ' + pct(cents(r.weight)) + '%</span></label>'; }).join('');
+  body += MS.sel.map(function(k, i){
+    var r = P.c0.filter(function(x){ return kOf(x) === k; })[0]; if (!r) return '';
+    return '<div class="rs"><div class="vh"><b>' + esc(nameOf(r.type, r.code)) + '</b><span class="mute small">' + esc(r.code) + ' · 현재 ' + pct(cents(r.weight)) + '% · 추천일 ' + esc(sinceOf(S, k) || '–') + '</span></div>'
+      + (inBase[k] ? '<textarea data-in="m:' + esc(k) + '" rows="2" placeholder="편출사유 (필수, ' + MEMO_MAX + '자 이내) — 예: 추세 약화"' + (i ? '' : ' autofocus') + '>' + esc(MS.memo[k] || '') + '</textarea><div class="cnt" id="cnt' + i + '">' + cntHtml(MS.memo[k]) + '</div>'
+                   : '<p class="mute small" style="margin:4px 0 0">오늘 편입한 종목 — 편출 기록 없이 오늘 구성에서만 빠집니다.</p>') + '</div>';
+  }).join('');
+  body += '<div class="small mute" style="margin:10px 0 4px">빠지는 비중 ' + pct(P.freed) + '%</div>'
+    + '<label class="opt" data-on="' + (MS.mode === 'cash') + '"><input type="radio" name="xm" data-mode="cash"' + (MS.mode === 'cash' ? ' checked' : '') + '><b>현금으로</b> <span class="mute small">남은 종목 비중 그대로</span></label>'
+    + '<label class="opt" data-on="' + (MS.mode === 'prop') + '"><input type="radio" name="xm" data-mode="prop"' + (MS.mode === 'prop' ? ' checked' : '') + '><b>남은 종목에 비례 배분</b> <span class="mute small">현금은 그대로</span></label>';
+  var miss = MS.sel.filter(function(k){ if (!inBase[k]) return false; var v = String(MS.memo[k] || '').trim(); return !v || v.length > MEMO_MAX; }).length;
+  return {title: '편출', body: body,
+    foot: footHtml(errLine(MS.err || P.err) + totHtml(P.nc) + (miss ? '<div class="warn small">편출사유 ' + miss + '개 남음</div>' : ''),
+      '<button type="button" data-close>취소</button><button type="button" class="pri dng" id="msave" data-save="exit"' + (miss || P.err ? ' disabled' : '') + ' style="background:var(--neg);border-color:var(--neg);color:#fff">편출 확정</button>')};
+};
+function saveExit(){
+  var P = exitProposal(); if (P.err) return;
+  var ex = {}; MS.sel.forEach(function(k){ ex[k] = String(MS.memo[k] || '').trim(); });
+  saveFrom('#msave', withToday(S, P.nc, ex), '편출 저장됨 — ' + MS.sel.map(function(k){ return nameOf(k.split('|')[0], k.split('|')[1]); }).join(', '));
+}
+
+// 비중 조절(한 종목)
+function w1Proposal(){
+  var c0 = comp(), I = sumC(c0), C = 10000 - I, idx = -1, nc = c0.map(clone), err = null;
+  c0.forEach(function(r, i){ if (kOf(r) === MS.key) idx = i; });
+  var w0 = idx >= 0 ? cents(c0[idx].weight) : 0, v = String(MS.val).trim(), tc = cents(v), d = tc - w0;
+  if (v === '' || !isFinite(Number(v))) err = '변경 비중을 숫자로 적으세요';
+  else if (!(tc > 0)) err = '0% 이하로 빼려면 편출을 쓰세요';
+  else if (Math.abs(Number(v) * 100 - tc) > 1e-6) err = '비중은 소수 둘째 자리까지';
+  else if (MS.mode === 'cash' && d > C) err = '현금(' + pct(C) + '%)이 부족합니다 — "다른 종목 비례 조정"을 고르세요';
+  if (!err && idx >= 0) {
+    nc[idx].weight = tc / 100;
+    if (MS.mode === 'prop') {
+      var others = c0.filter(function(r, i){ return i !== idx; }), OI = I - w0;
+      if (OI - d <= 0) err = '다른 종목 비중이 모자랍니다';
+      else { var a = alloc(OI - d, others.map(function(r){ return cents(r.weight); })), j = 0; nc.forEach(function(r, i){ if (i !== idx) r.weight = a[j++] / 100; }); }
+    }
+  }
+  return {c0: c0, nc: nc, w0: w0, C: C, err: err || compErr(nc), idx: idx};
+}
+MODAL.w1 = function(){
+  var P = w1Proposal(), r = P.c0[P.idx], I1 = sumC(P.nc);
+  if (!r) return {title: '비중 조절', body: '<p class="err">종목이 구성에 없습니다.</p>', foot: footHtml('', '<button type="button" data-close>닫기</button>')};
+  var chg = MS.mode === 'prop' ? P.c0.map(function(x, i){ if (i === P.idx) return ''; var a = cents(x.weight), b = cents(P.nc[i].weight); return a === b ? '' : '<li>' + esc(nameOf(x.type, x.code)) + ' ' + pct(a) + '% → ' + pct(b) + '%</li>'; }).filter(Boolean) : [];
+  var calc = '<div class="kv small"><span>현재 현금</span><span class="num">' + pct(P.C) + '%</span><span>변경 후 현금</span><span class="num"><b>' + pct(10000 - I1) + '%</b></span></div>'
+    + (chg.length ? '<details open><summary>다른 종목 비중 변화 ' + chg.length + '개</summary><ul class="dl small">' + chg.join('') + '</ul></details>' : '');
+  return {title: '비중 조절 — ' + nameOf(r.type, r.code),
+    body: '<div class="kv small" style="margin:0 0 10px"><span>종목</span><span>' + esc(nameOf(r.type, r.code)) + ' · ' + esc(r.code) + ' · ' + esc(r.type) + '</span><span>현재 비중</span><span class="num"><b>' + pct(P.w0) + '%</b></span></div>'
+      + '<label class="small mute">변경 비중<br><span class="wbox"><input data-in="val" inputmode="decimal" value="' + esc(MS.val) + '" style="width:140px" autofocus><span>%</span></span></label> '
+      + '<button type="button" data-cashall style="margin-left:6px">남은 현금 전부</button>'
+      + '<div style="margin:12px 0 0"><div class="small mute" style="margin:0 0 4px">차액 처리</div>'
+      + '<label class="opt" data-on="' + (MS.mode === 'cash') + '"><input type="radio" name="wm" data-mode="cash"' + (MS.mode === 'cash' ? ' checked' : '') + '><b>현금에서 / 현금으로</b> <span class="mute small">다른 종목 그대로</span></label>'
+      + '<label class="opt" data-on="' + (MS.mode === 'prop') + '"><input type="radio" name="wm" data-mode="prop"' + (MS.mode === 'prop' ? ' checked' : '') + '><b>다른 종목 비례 조정</b> <span class="mute small">현금 그대로</span></label></div>'
+      + '<div id="mcalc">' + calc + '</div>',
+    mcalc: calc,
+    foot: footHtml(errLine(MS.err || P.err) + totHtml(P.nc), '<button type="button" data-close>취소</button><button type="button" class="pri" id="msave" data-save="w1"' + (P.err ? ' disabled' : '') + '>저장</button>')};
+};
+function saveW1(){ var P = w1Proposal(); if (P.err) return; saveFrom('#msave', withToday(S, P.nc, null), '비중 조절 저장됨 — ' + nameOf(P.c0[P.idx].type, P.c0[P.idx].code) + ' ' + pct(P.w0) + '% → ' + pct(cents(MS.val)) + '%'); }
+
+// 비중 조절(전체)
+function wallProposal(){
+  var c0 = comp(), nc = c0.map(clone), err = null;
+  nc.forEach(function(r){ var v = MS.ws[kOf(r)]; if (v != null) { if (String(v).trim() === '' || !isFinite(Number(v))) err = err || nameOf(r.type, r.code) + ': 숫자를 적으세요'; else r.weight = Number(v); } });
+  return {c0: c0, nc: nc, err: err || compErr(nc)};
+}
+MODAL.wall = function(){
+  var P = wallProposal();
+  return {title: '비중 조절 — 전체',
+    body: '<p class="small mute" style="margin:0 0 8px">여러 종목을 한 번에 조절합니다. 합이 100%를 넘을 수 없고, 남는 비중은 현금입니다.</p>'
+      + '<div class="acts" style="margin:0 0 8px"><button type="button" data-eqall>동일 비중으로(현금 0%)</button><button type="button" data-propall>현금까지 비례 배분</button></div>'
+      + P.c0.map(function(r){ var k = kOf(r); return '<div class="nw"><div style="min-width:0"><b>' + esc(nameOf(r.type, r.code)) + '</b> <span class="mute small">' + esc(r.code) + ' · 현재 ' + pct(cents(r.weight)) + '%</span></div>'
+        + '<span class="wbox"><input data-in="wa:' + esc(k) + '" inputmode="decimal" value="' + esc(MS.ws[k] != null ? MS.ws[k] : pct(cents(r.weight))) + '"><span>%</span></span></div>'; }).join(''),
+    foot: footHtml(errLine(MS.err || P.err) + totHtml(P.nc), '<button type="button" data-close>취소</button><button type="button" class="pri" id="msave" data-save="wall"' + (P.err || sigOf(P.c0) === sigOf(P.nc) ? ' disabled' : '') + '>저장</button>')};
+};
+function saveWall(){ var P = wallProposal(); if (P.err) return; saveFrom('#msave', withToday(S, P.nc, null), '비중 조절 저장됨'); }
+
+// 사유·표시 이름 수정(편입 사유 = 그 편입부터 이어진 모든 적용일의 같은 종목 줄), 편출사유 수정
+function runDates(key, start){ var out = [], on = false; vers(S).forEach(function(v){ var has = v.rows.some(function(r){ return kOf(r) === key; }); if (v.date === start) on = true; if (on) { if (has) out.push(v.date); else on = false; } }); return out; }
+MODAL.memo = function(){
+  var tp = MS.key.split('|')[0], cd = MS.key.split('|')[1], ds = runDates(MS.key, MS.start), past = MS.start < today();
+  return {title: '추천사유 · 표시 이름 — ' + nameOf(tp, cd),
+    body: '<p class="small mute" style="margin:0 0 8px">' + esc(cd) + ' · ' + esc(tp) + ' · 추천일 ' + esc(MS.start) + (past ? ' · <b>과거 기록 — 문구만 고칠 수 있습니다(오탈자·설명 보완용)</b>' : '') + '</p>'
+      + '<label class="small mute">추천사유<textarea data-in="m:x" rows="3" autofocus>' + esc(MS.memo.x || '') + '</textarea><div class="cnt small" id="cnt0" style="text-align:right">' + cntHtml(MS.memo.x) + '</div></label>'
+      + '<label class="small mute" style="display:block;margin-top:8px">표시 이름(비우면 자동 — 예: 미국 종목 한글 이름)<input data-in="nm" value="' + esc(MS.name || '') + '"></label>'
+      + '<p class="help">적용 범위: ' + esc(ds.join(', ')) + ' 적용일의 같은 종목 줄. 종목·비중·추천일·추천가는 바뀌지 않습니다.</p>',
+    foot: footHtml(errLine(MS.err) + (String(MS.memo.x || '').length > MEMO_MAX ? '<span class="err small">' + MEMO_MAX + '자 이내</span>' : ''),
+      '<button type="button" data-close>취소</button><button type="button" class="pri" id="msave" data-save="memo"' + (String(MS.memo.x || '').length > MEMO_MAX ? ' disabled' : '') + '>저장</button>')};
+};
+function saveMemo(){
+  var ds = runDates(MS.key, MS.start), N = clone(S), m = String(MS.memo.x || '').trim(), nm = String(MS.name || '').trim();
+  N.rows.forEach(function(r){ if (kOf(r) === MS.key && ds.indexOf(r.date) >= 0) { if (m) r.memo = m; else delete r.memo; if (nm) r.name = nm; else delete r.name; } });
+  saveFrom('#msave', N, '사유·이름 저장됨');
+}
+MODAL.xmemo = function(){
+  var tp = MS.key.split('|')[0], cd = MS.key.split('|')[1];
+  return {title: '편출사유 — ' + nameOf(tp, cd),
+    body: '<p class="small mute" style="margin:0 0 8px">' + esc(cd) + ' · 편출일 ' + esc(MS.date) + (MS.date < today() ? ' · <b>과거 기록 — 문구만 고칠 수 있습니다</b>' : '') + '</p>'
+      + '<textarea data-in="m:x" rows="3" autofocus placeholder="편출사유">' + esc(MS.memo.x || '') + '</textarea><div class="cnt small" id="cnt0" style="text-align:right">' + cntHtml(MS.memo.x) + '</div>',
+    foot: footHtml(errLine(MS.err), '<button type="button" data-close>취소</button><button type="button" class="pri" id="msave" data-save="xmemo"' + (!String(MS.memo.x || '').trim() || String(MS.memo.x).length > MEMO_MAX ? ' disabled' : '') + '>저장</button>')};
+};
+function saveXmemo(){
+  var N = clone(S), tp = MS.key.split('|')[0], cd = MS.key.split('|')[1], m = String(MS.memo.x || '').trim(), e = N.exits.filter(function(x){ return x.date === MS.date && x.type === tp && x.code === cd; })[0];
+  if (e) e.memo = m; else N.exits.push({date: MS.date, type: tp, code: cd, memo: m});
+  saveFrom('#msave', N, '편출사유 저장됨');
+}
+// 오늘 변경사항 되돌리기(오늘 적용일만)
+MODAL.undo = function(){
+  var b = baseVer(S), tv = todayVer(S), D = tv ? diffLines(b, tv.rows, S.exits, today()) : [];
+  return {title: '오늘 변경사항 되돌리기',
+    body: '<p class="small">오늘(' + today() + ') 저장한 변경을 모두 취소하고 <b>' + (b ? b.date : '–') + '</b> 구성으로 돌아갑니다. 오늘 이전 기록은 그대로입니다.</p>'
+      + (D.length ? '<ul class="dl small">' + D.map(function(x){ return '<li>' + esc(x.kind) + ' ' + esc(nameOf(x.k.split('|')[0], x.k.split('|')[1])) + ' ' + esc(x.txt) + '</li>'; }).join('') + '</ul>' : ''),
+    foot: footHtml(errLine(MS.err), '<button type="button" data-close>취소</button><button type="button" class="pri" id="msave" data-save="undo" style="background:var(--neg);border-color:var(--neg);color:#fff">되돌리기</button>')};
+};
+function saveUndo(){ if (!baseVer(S)) { MS.err = '첫 구성은 되돌릴 수 없습니다(MP 전체가 비게 됨)'; mRender(); return; } var t = today(), N = clone(S); N.rows = N.rows.filter(function(r){ return r.date < t; }); N.exits = N.exits.filter(function(e){ return e.date < t; }); saveFrom('#msave', N, '오늘 변경사항을 되돌렸습니다'); }
+
+MODAL.pmemo = function(){
+  var p = S[MS.l][MS.i];
+  return {title: '관심 메모 — ' + nameOf(wType(MS.l, p), p.code),
+    body: '<p class="small mute" style="margin:0 0 8px">사이트 관심 표의 메모 칸에 공개됩니다.</p><input data-in="m:x" value="' + esc(MS.memo.x || '') + '" placeholder="메모(비우면 없음)" autofocus><div class="cnt small" id="cnt0" style="text-align:right">' + cntHtml(MS.memo.x) + '</div>',
+    foot: footHtml(errLine(MS.err), '<button type="button" data-close>취소</button><button type="button" class="pri" id="msave" data-save="pmemo"' + (String(MS.memo.x || '').length > MEMO_MAX ? ' disabled' : '') + '>저장</button>')};
+};
+function savePmemo(){ var N = clone(S), m = String(MS.memo.x || '').trim(), p = N[MS.l][MS.i]; if (m) p.memo = m; else delete p.memo; saveFrom('#msave', N, '메모 저장됨'); }
+var SAVERS = {add: saveAdd, exit: saveExit, w1: saveW1, wall: saveWall, memo: saveMemo, xmemo: saveXmemo, undo: saveUndo, pmemo: savePmemo};
+
+// 창 안 입력·클릭
+$('#modal').addEventListener('input', function(e){
+  if (!MS) return;
+  var k = e.target.dataset.in; if (!k) return;
+  var v = e.target.value, m;
+  MS.err = null;
+  if (k === 'q') { MS.q = v; MS.open = {}; var el = $('#mlist'); if (el) el.innerHTML = listHtml(); $('#mf').innerHTML = MODAL[MS.kind]().foot; return; }
+  if (k === 'amt') { MS.amt = v; MS.ws = {}; mSoft(['mnew', 'mcalc']); return; }
+  if ((m = k.match(/^w:(.+)$/))) { MS.ws[m[1]] = v; mSoft(['mcalc']); return; }
+  if ((m = k.match(/^wa:(.+)$/))) { MS.ws[m[1]] = v; mSoft([]); return; }
+  if ((m = k.match(/^m:(.+)$/))) {
+    MS.memo[m[1]] = v;
+    if (e.target.tagName === 'TEXTAREA') { e.target.style.height = 'auto'; e.target.style.height = (e.target.scrollHeight + 2) + 'px'; }
+    var c = e.target.parentNode.querySelector('.cnt'); if (c) c.innerHTML = cntHtml(v);
+    mSoft([]); return;
+  }
+  if (k === 'val') { MS.val = v; mSoft(['mcalc']); return; }
+  if (k === 'nm') { MS.name = v; return; }
+});
+$('#modal').addEventListener('change', function(e){
+  if (!MS) return;
+  var d = e.target.dataset;
+  if (d.mode) { MS.mode = d.mode; MS.amt = null; MS.ws = MS.kind === 'wall' ? MS.ws : {}; MS.err = null; mRender(); }
+  else if (d.xsel) { var i = MS.sel.indexOf(d.xsel); if (e.target.checked && i < 0) MS.sel.push(d.xsel); else if (!e.target.checked && i >= 0) MS.sel.splice(i, 1); mRender(); }
+});
+$('#modal').addEventListener('click', function(e){
+  if (!MS) return;
+  var b = e.target.closest('button'), d = b ? b.dataset : {};
+  if (b && d.close != null) { mClose(); return; }
+  if (b && d.save) { if (!b.disabled && SAVERS[d.save]) SAVERS[d.save](); return; }
+  if (b && d.go) { MS.step = +d.go; MS.err = null; mRender(); var f = $('#mb [autofocus]'); if (f && MS.step !== 2) f.focus(); return; }
+  if (b && d.tab) { MS.tab = d.tab; MS.open = {}; $('#mlist').innerHTML = listHtml(); return; }
+  if (b && d.mk) { MS.mk = d.mk; MS.open = {}; $('#mlist').innerHTML = listHtml(); return; }
+  if (b && d.more) { MS.open[d.more] = !MS.open[d.more]; $('#mlist').innerHTML = listHtml(); return; }
+  if (b && d.unsel) { MS.sel = MS.sel.filter(function(x){ return x.key !== d.unsel; }); $('#mlist').innerHTML = listHtml(); $('#mf').innerHTML = MODAL[MS.kind]().foot; return; }
+  if (b && d.direct) {
+    var code = normCode(d.direct, (MS.q || '').trim()), key = d.direct + '|' + code;
+    if (!isSel(key) && !heldKeys()[key]) MS.sel.push({key: key, type: d.direct, code: code, name: code, r: null});
+    MS.q = ''; var qi = $('#mb [data-in="q"]'); if (qi) { qi.value = ''; qi.focus(); }
+    $('#mlist').innerHTML = listHtml(); $('#mf').innerHTML = MODAL[MS.kind]().foot; return;
+  }
+  if (b && d.cashall != null) { var P = w1Proposal(); MS.val = pct(P.w0 + P.C); MS.mode = 'cash'; mRender(); return; }
+  if (b && d.eqall != null) { var c0 = comp(), a = alloc(10000, c0.map(function(){ return 1; })); c0.forEach(function(r, i){ MS.ws[kOf(r)] = pct(a[i]); }); mRender(); return; }
+  if (b && d.propall != null) { var c1 = comp(), a2 = alloc(10000, c1.map(function(r){ return cents(r.weight); })); c1.forEach(function(r, i){ MS.ws[kOf(r)] = pct(a2[i]); }); mRender(); return; }
+  var it = e.target.closest('[data-it]');
+  if (it && !b && !e.target.closest('.more')) {
+    if (it.getAttribute('aria-disabled') === 'true') return;
+    var k = it.dataset.it;
+    if (isSel(k)) MS.sel = MS.sel.filter(function(x){ return x.key !== k; }); else if (LISTED[k]) MS.sel.push(LISTED[k]);
+    $('#mlist').innerHTML = listHtml(); $('#mf').innerHTML = MODAL[MS.kind]().foot;
+  }
+});
+
+// ---------------------------------------------------------------- 본 화면 클릭
+$('#root').addEventListener('click', function(e){
+  var el = e.target.closest('[data-act],[data-view]'); if (!el || !S) return;
+  var d = el.dataset, a = d.act, t = today();
+  if (d.view) { VIEW = d.view; render(); return; }
+  if (a && a.indexOf('s_') === 0) { siteClick(a, d); return; }   // 사이트 탭(D-18)
+  if (a === 'det') { OPEN[d.k] = !OPEN[d.k]; render(); return; }
+  if (a === 'add') mOpen({kind: 'add', step: 1, tab: 'rs', mk: 'KS', q: '', sel: [], open: {}, mode: null, amt: null, ws: {}, memo: {}});
+  else if (a === 'exit') mOpen({kind: 'exit', sel: d.k ? [d.k] : [], pickList: !d.k, memo: {}, mode: 'cash'});
+  else if (a === 'w1') { var r = comp().filter(function(x){ return kOf(x) === d.k; })[0]; if (r) mOpen({kind: 'w1', key: d.k, val: pct(cents(r.weight)), mode: 'cash'}); }
+  else if (a === 'wall') mOpen({kind: 'wall', ws: {}});
+  else if (a === 'memo') { var rr = S.rows.filter(function(x){ return kOf(x) === d.k && x.date === d.d; })[0] || {}; mOpen({kind: 'memo', key: d.k, start: d.d, memo: {x: rr.memo || ''}, name: rr.name || ''}); }
+  else if (a === 'xmemo') { var ex = S.exits.filter(function(x){ return x.date === d.d && x.type + '|' + x.code === d.k; })[0]; mOpen({kind: 'xmemo', key: d.k, date: d.d, memo: {x: ex ? ex.memo : ''}}); }
+  else if (a === 'undo') { if (baseVer(S)) mOpen({kind: 'undo'}); }
+  else if (a === 'star') toggleStar(d.k);
+  else if (a === 'wtab' || a === 'wmk') { WB[a === 'wtab' ? 'tab' : 'mk'] = d.v; $('#wtop').innerHTML = wtopHtml(); }
+  else if (a === 'wmp') {   // 관심 → MP 편입: 고른 채로 비중 배분 단계부터(← 이전 = 평소 검색 화면)
+    var tt = d.k.split('|')[0], cc = d.k.slice(tt.length + 1), rx = idxOf(tt, cc);
+    mOpen({kind: 'add', step: 2, tab: 'pk', mk: K2T[tt], q: '', sel: [rx ? itemOf(rx) : {key: d.k, type: tt, code: cc, name: nameOf(tt, cc), r: null}], open: {}, mode: null, amt: null, ws: {}, memo: {}});
+  }
+  else if (a === 'wmemo') mOpen({kind: 'pmemo', l: d.l, i: +d.i, memo: {x: S[d.l][+d.i].memo || ''}});
+  else if (a === 'wup' || a === 'wdn') {
+    var i = +d.i, j = a === 'wup' ? i - 1 : i + 1, N = clone(S), x = N[d.l][i]; N[d.l][i] = N[d.l][j]; N[d.l][j] = x;
+    persist(N, '순서 저장됨').catch(function(x){ toast(x.message, true); });
+  }
+  else if (a === 'ssave') {
+    var N3 = clone(S); N3.settings = {name: SET.name.trim(), intro: SET.intro.trim(), visible: !!SET.visible};
+    persist(N3, '설정 저장됨').catch(function(x){ toast(x.message, true); });
+  }
+});
+$('#root').addEventListener('toggle', function(e){ var i = e.target.dataset && e.target.dataset.li; if (i != null && SD.links && SD.links[+i]) SD.links[+i]._open = e.target.open; }, true);
+$('#root').addEventListener('input', function(e){
+  if (e.target.dataset.wq != null) { WB.q = e.target.value; var el = $('#wres'); if (el) el.innerHTML = wresHtml(); return; }
+  var sk = e.target.dataset.sk;   // 사이트 탭 입력 → 카드별 사본(체크·종류 바꿈은 상태 문구·안내가 바뀌니 다시 그림)
+  if (sk) { sdSet(sk, e.target.type === 'checkbox' ? e.target.checked : e.target.value); if (/^vis\./.test(sk) || /\.kind$/.test(sk) || /^links\.\d+\.on$/.test(sk)) render(); return; }
+  var k = e.target.dataset.k; if (!k || !SET) return;
+  if (k === 'sn') SET.name = e.target.value; else if (k === 'si') SET.intro = e.target.value; else if (k === 'sv') SET.visible = e.target.checked;
+});
+
+// ---------------------------------------------------------------- 관리자 전용 문서(rs_tracker/mp_private) — 손절가·지정가·명령 기록(D-17)
+// 공개 문서와 따로 둔다: 보안 규칙상 관리자 UID만 읽기·쓰기. 명령 입력의 저장은 두 문서를 documents:commit 한 번으로(전부 되거나 전부 안 됨).
+var FSB = (EP.firestore || 'https://firestore.googleapis.com/v1') + '/projects/' + encodeURIComponent(STORE.projectId) + '/databases/(default)/documents';
+var DNAME = 'projects/' + STORE.projectId + '/databases/(default)/documents/', DPATH = STORE.doc || 'rs_tracker/mp', PPATH = DPATH + '_private';
+var PV = null, PUT = null, PV_ERR = null;    // 전용 문서 {marks, log} · 버전 · 못 쓰는 이유
+var LOG_MAX = 500, PRIV_BYTES = 600000;       // 기록 최대 500건, 문서 60만 바이트(Firestore 한도 1MiB) 넘기 전에 오래된 기록부터 뺀다
+function u8(s){ return new TextEncoder().encode(s).length; }
+function normPriv(p){
+  p = p || {}; var m = {};
+  Object.keys(p.marks || {}).forEach(function(k){ if (!Array.isArray(p.marks[k])) return;
+    m[k] = p.marks[k].filter(function(r){ return r && typeof r === 'object'; }).slice(-20).map(function(r){
+      var o = {set: String(r.set || ''), since: r.since ? String(r.since) : null};
+      if (Number(r.stop) > 0) o.stop = Number(r.stop); if (Number(r.px) > 0) o.px = Number(r.px); if (r.off) o.off = 1; return o; }); });
+  return {marks: m, log: Array.isArray(p.log) ? p.log.filter(function(x){ return x && typeof x === 'object'; }).slice(-LOG_MAX) : []};
+}
+function loadPriv(){
+  return idToken().then(function(tok){ return fetch(FSB + '/' + PPATH + '?key=' + KEY, {cache: 'no-store', headers: {'Authorization': 'Bearer ' + tok}}); })
+    .then(function(r){
+      if (r.status === 404) { PV = normPriv({}); PUT = null; return; }
+      if (r.status === 403) { PV = null; PV_ERR = '관리자 전용 문서(rs_tracker/mp_private)의 보안 규칙이 없어 손절가·지정가·명령 기록을 저장할 수 없습니다.'; return; }
+      if (!r.ok) throw new Error(String(r.status));
+      return r.json().then(function(d){ PV = normPriv(JSON.parse(((d.fields || {}).json || {}).stringValue || '{}')); PUT = d.updateTime; });
+    }).catch(function(x){ PV = null; PV_ERR = '관리자 전용 문서를 읽지 못했습니다(' + x.message + ').'; });
+}
+function trimPriv(P){ while (P.log.length > LOG_MAX) P.log.shift(); while (P.log.length && u8(JSON.stringify(P)) > PRIV_BYTES) P.log.shift(); return P; }
+function fsFields(o){ return {json: {stringValue: JSON.stringify(o)}, saved_at: {timestampValue: new Date().toISOString()}}; }
+// 공개 문서(N)와 전용 문서(P)를 한 번에 저장. P가 없으면 기존 persist 그대로. 검증은 persist와 같은 함수(lockErr·stateErr·크기).
+function saveAll(N, P, msg){
+  if (!P) return persist(N, msg);
+  if (!PV) return Promise.reject(new Error(PV_ERR || '관리자 전용 문서를 쓸 수 없습니다.'));
+  if (BUSY) return Promise.reject(new Error('저장 중입니다'));
+  var pub = JSON.stringify(toSave(N)) !== JSON.stringify(toSave(S));
+  var e = pub ? (lockErr(S, N) || stateErr(N)) : null;
+  if (e) return Promise.reject(new Error(e));
+  if (JSON.stringify(toSave(N)).length >= 290000) return Promise.reject(new Error('저장 문서가 너무 큽니다(보안 규칙 300KB 한도).'));
+  trimPriv(P);
+  if (u8(JSON.stringify(P)) > PRIV_BYTES) return Promise.reject(new Error('관리자 전용 문서가 너무 큽니다.'));
+  var W = [];
+  if (pub) W.push({update: {name: DNAME + DPATH, fields: fsFields(toSave(N))}, currentDocument: UT ? {updateTime: UT} : {exists: false}});
+  W.push({update: {name: DNAME + PPATH, fields: fsFields(P)}, currentDocument: PUT ? {updateTime: PUT} : {exists: false}});
+  BUSY = true;
+  return idToken().then(function(tok){
+    return fetch(FSB + ':commit?key=' + KEY, {method: 'POST', headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok}, body: JSON.stringify({writes: W})});
+  }).then(function(r){ return r.json().then(function(j){
+    if (r.ok) return j;
+    var st = (j.error && j.error.status) || r.status;
+    if (st === 'FAILED_PRECONDITION' || st === 'ALREADY_EXISTS' || st === 'NOT_FOUND' || st === 'ABORTED') throw new Error('다른 창에서 먼저 저장됐습니다 — 아무것도 저장되지 않았습니다. 새로고침한 뒤 다시 하세요.');
+    if (st === 'PERMISSION_DENIED' || r.status === 403) throw new Error('저장 권한이 없습니다(보안 규칙) — 아무것도 저장되지 않았습니다.');
+    if (st === 'UNAUTHENTICATED' || r.status === 401) throw new Error('로그인이 만료됐습니다 — 아무것도 저장되지 않았습니다. 다시 로그인하세요.');
+    throw new Error('저장 실패(' + st + ') — 아무것도 저장되지 않았습니다.');
+  }); }, function(){ throw new Error('통신 오류 — 저장됐는지 새로고침해서 확인하세요.'); }).then(function(j){
+    var wr = j.writeResults || [];
+    BUSY = false;
+    if (pub) { UT = wr[0].updateTime; S = norm(JSON.parse(JSON.stringify(toSave(N)))); SET = null; }
+    PUT = wr[wr.length - 1].updateTime; PV = normPriv(JSON.parse(JSON.stringify(P)));
+    toast(msg || '저장됨 — 사이트에 바로 반영');
+    render();
+  }, function(x){ BUSY = false; throw x; });
+}
+
+// 손절가·지정가: 종목별 기록 목록(지우지 않음). 지금 값 = 마지막 기록이 지금 맥락과 맞을 때만.
+//   MP 보유 중에 건 값(since = 그 편입의 추천일) → 편출·재편입하면 기록으로만 남는다. 관심일 때 건 값(since 없음) → 그 뒤 MP에 들어간 적 있으면 기록으로만.
+function heldIn(X, k){ return comp(X).some(function(r){ return kOf(r) === k; }); }
+function markOf(k, X, P){
+  X = X || S; P = P === undefined ? PV : P; var L = P && P.marks[k]; if (!L || !L.length) return null;
+  var m = L[L.length - 1]; if (m.off) return null;
+  if (m.since) return heldIn(X, k) && sinceOf(X, k) === m.since ? m : null;
+  return !heldIn(X, k) && !vers(X).some(function(v){ return v.date >= m.set && v.rows.some(function(r){ return kOf(r) === k; }); }) ? m : null;
+}
+function ccyOf(t){ return String(t).indexOf('미국') === 0 ? 'USD' : 'KRW'; }
+function money2(v, ccy){ return ccy === 'USD' ? '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : Math.round(v).toLocaleString() + '원'; }
+function lastPx(t, c){   // 종가 = 계산본(MP 보유) → 검색 목록(사이트 표와 같은 기준일)
+  var h = MPH[t + '|' + c];
+  if (h && h.px1 != null) return {v: h.px1, d: h.pdate || ''};
+  var ix = idxOf(t, c), v = ix ? g(ix, 'px') : null;
+  return v != null ? {v: v, d: (IDX && IDX.asof[MKT[K2T[t]]]) || ''} : null;
+}
+function markTxt(m, ccy){ var o = []; if (m && m.stop) o.push('손절가 ' + money2(m.stop, ccy)); if (m && m.px) o.push('지정가 ' + money2(m.px, ccy)); return o.join(' · '); }
+function markHtml(t, c){
+  var m = PV ? markOf(t + '|' + c) : null; if (!m) return '';
+  var ccy = ccyOf(t), p = lastPx(t, c), hit = m.stop && p && p.v < m.stop;
+  return ' · <span class="mk' + (hit ? ' hit' : '') + '" title="관리자만 보는 값(사이트에 안 나감)">' + esc(markTxt(m, ccy))
+    + (hit ? ' — 종가 ' + esc(money2(p.v, ccy)) + (p.d ? '(' + esc(String(p.d).slice(5)) + ')' : '') + ' · 손절가 아래' : '') + '</span>';
+}
+
+// ================================================================ 명령 입력: 입력 → 해석(NLP) → 명령 → 검증 → 미리보기 → 승인 → 저장(D-17)
+// 해석 계층 = AI(Gemini, D-20) 먼저 → 결과 검사(aiCmds) → 안 되면 규칙(RULES). 어느 쪽이든 결과는 아래 Cmd 목록뿐이고, 이후 단계는 같다:
+//   parse → {cmds: [Cmd]} 또는 {fail: '안내'}. 종목 찾기는 NLX(사이트 검색 목록 · 줄임말, 읽기 전용).
+//   Cmd = {op, a: 종목({key, type, code, name} 또는 {q: 찾을 말}), w: 목표 %, dw: ±%p, mode: 'cash'|'prop'|'eq', memo: 입력 문장 그대로,
+//          how: 'append'|'replace', stop/px: 가격(0 = 지움), topic: [단어], mks: ['KS'…], soft: 목표 없음}
+//   op = MP_ADD 편입 · MP_REMOVE 편출 · MP_SET 목표 비중 · MP_DELTA ±%p · MP_ANY(비중만 — 보유면 변경, 아니면 편입) · WATCH_ADD · WATCH_REMOVE
+//        · ADD_ANY('넣어' — 관심/MP 모름) · DEL_ANY('빼' — 관심/MP 모름) · MARK 손절가·지정가 · MEMO 사유·관심 메모 · Q_MP · Q_WATCH · Q_WHY · Q_RANK · HELP
+// 종목 확정·배분 계산·검증·저장은 해석 계층 밖에서 기존 함수(search · addProposal · exitProposal · w1Proposal · wallProposal · withToday · lockErr · saveAll)로만 한다.
+var ALIAS = {'하닉': '한국주식|000660', '삼전': '한국주식|005930', '엔비': '미국주식|NVDA', '테슬': '미국주식|TSLA', '팔란': '미국주식|PLTR'};   // 사용자 지정 줄임말
+var KO_US = {'엔비디아': 'NVDA', '테슬라': 'TSLA', '팔란티어': 'PLTR', '애플': 'AAPL', '마이크로소프트': 'MSFT', '아마존': 'AMZN', '알파벳': 'GOOGL', '구글': 'GOOGL', '메타': 'META', '브로드컴': 'AVGO'};   // 검색 목록에 영어 이름만 있는 미국 종목
+var NAMEX = null;
+function nkey(s){ return String(s || '').toLowerCase().replace(/\s+/g, ''); }
+function itemFromKey(k){ var t = k.split('|')[0], c = k.slice(t.length + 1), r = idxOf(t, c); return r ? itemOf(r) : {key: k, type: t, code: c, name: nameOf(t, c), r: null}; }
+function nameIndex(){
+  if (NAMEX) return NAMEX;
+  NAMEX = {};
+  var add = function(n, k){ var x = nkey(n); if (!x) return; (NAMEX[x] = NAMEX[x] || []); if (NAMEX[x].indexOf(k) < 0) NAMEX[x].push(k); };
+  if (IDX) IDX.rows.forEach(function(r){ add(r[2], T2K[r[0]] + '|' + r[1]); });
+  if (MPDOC && MPDOC.names) Object.keys(MPDOC.names).forEach(function(k){ add(MPDOC.names[k], k); });
+  S.rows.forEach(function(r){ if (r.name) add(r.name, kOf(r)); });
+  return NAMEX;
+}
+var NLX = {
+  exact: function(q){   // 줄임말 · 코드 · 이름이 정확히 같을 때만 — 없으면 null, 둘 이상이면 {many}
+    var s = String(q || '').trim(); if (!s) return null;
+    if (ALIAS[s]) return itemFromKey(ALIAS[s]);
+    if (KO_US[s]) return itemFromKey('미국주식|' + KO_US[s]);
+    var u = s.toUpperCase(), r;
+    if (/^[0-9][0-9A-Z]{5}$/.test(u) && (r = IX['KS|' + u] || IX['KE|' + u])) return itemOf(r);
+    if (/^[A-Za-z][A-Za-z.\-]{1,5}$/.test(s) && (r = IX['US|' + u] || IX['UE|' + u])) return itemOf(r);
+    var L = nameIndex()[nkey(s)];
+    if (L && L.length === 1) return itemFromKey(L[0]);
+    if (L && L.length > 1) return {many: L.map(itemFromKey)};
+    return null;
+  },
+  find: function(q){   // 이름 일부로 찾기 — 주식이 하나면 확정, 여럿이면 후보(임의 선택 안 함)
+    var s = String(q || '').trim(); if (s.length < 2 || !IDX) return {none: true};
+    var n = nkey(s), u = s.toUpperCase();
+    var rs = search(s).filter(function(r){ return nkey(r[2]).indexOf(n) >= 0 || r[1].indexOf(u) === 0; });
+    var st = rs.filter(function(r){ return r[0] === 'KS' || r[0] === 'US'; }), et = rs.filter(function(r){ return r[0] === 'KE' || r[0] === 'UE'; });
+    if (st.length === 1) return {one: itemOf(st[0])};
+    if (!st.length && et.length === 1) return {one: itemOf(et[0])};
+    if (!rs.length) return {none: true};
+    var c = (st.length ? st : et);
+    return {many: c.slice(0, 6).map(itemOf), more: c.length > 6 ? c.length : 0};
+  },
+  summary: function(){   // 나중에 AI 해석기를 붙일 때 넘길 최소 맥락(지금은 안 씀) — 보유·비중·현금·관심 코드만
+    return {mp: comp().map(function(r){ return [r.type, r.code, nameOf(r.type, r.code), r.weight]; }), cash: pct(10000 - sumC(comp())),
+      watch: S.watch.map(function(p){ return p.market + ':' + p.code; }), picks: S.picks.map(function(p){ return p.market + ':' + p.code; })};
+  }
+};
+
+// ---- 규칙 해석기(외부 호출 없음). 모르는 말이 하나라도 있으면 추측하지 않고 fail.
+var RULES = (function(){
+  var PART = /(에서|에도|으로|까지|만큼|이랑|하고|에게|을|를|은|는|이|가|에|도|로|와|과|의|랑|만|씩|요)$/;
+  var K = [['WATCH', /^(관심|관종|워치|찜)/], ['MP', /^(mp|엠피|모델|포트폴리오|포폴)/i], ['STOP', /^(손절|스탑|스톱)/], ['PX', /^(지정가|매수가|진입가)/],
+    ['ADD', /^(넣|담|편입|추가|매수|등록|포함|사줘|사자|살래)/], ['REM', /^(빼|뺴|제외|편출|삭제|제거|해제|정리|매도|팔|청산|없애|지워|지우)/],
+    ['UP', /^(늘|올려|올리|확대|증가|키워|키우|상향)/], ['DOWN', /^(줄|낮|축소|감소|내려|내리|하향)/], ['SET', /^(맞춰|맞추|맞게|변경|바꿔|바꾸|조정|수정|설정|고정)/],
+    ['PROP', /^비례/], ['EQ', /^(동일|균등|똑같)/], ['CASH', /^현금/], ['SOFT', /^(좀|조금|약간|살짝|적당)/],
+    ['QR', /^(좋|추천|만한|어떤|괜찮|순위|랭킹|상위|검색|찾아|찾기|강한)/], ['QS', /^(보여|조회|알려|현황|목록|리스트|확인|뭐|어때)/],
+    ['WHY', /^(왜|이력|히스토리|언제|근거)/], ['MKT', /^(한국|국내|미국|해외|etf|주식)$/i], ['HOLD', /^(구성|보유|현재)/]];
+  var FILL = /^(줘|해|해줘|해주세요|주세요|요|그리고|및|다시|바로|지금|전체|자산|자산의|비중|비중을|비중은|비중도|종목|종목을|것|거|걸|그냥|일단|해둬|둬|놔|해놔|기록|기록해|기록해줘|기록해둬|적어|적어줘|남겨|남겨줘|저장|저장해|저장해줘|나머지|나머지는|중|중에|중에서|을|를|은|는|이|가|에|에서|로|으로|도|하고|고|랑|와|과|더|만|정도|쯤|씩|들어가|들어가있어|들어가있지|들어가\S*|있어|있지|해라|하자|할래|해봐|부탁|부탁해|좀더|하고서|그다음|다음|후|이후|같이|함께|도같이|목록|리스트|좀요|요즘|최근|쪽|관련|것들|애들|있는|거야|거지|가격|가는|로는|으로는)$/;
+  function kw(w){ var lw = w.toLowerCase(); for (var i = 0; i < K.length; i++) if (K[i][1].test(lw)) return K[i][0]; return null; }
+  function strip(w){ var o = w; for (var i = 0; i < 2; i++) { var m = o.match(PART); if (!m || o.length - m[0].length < 1) break; o = o.slice(0, -m[0].length); } return o; }
+  function numTok(w){
+    var m = w.match(/^(\$)?([+-])?(\d+(?:\.\d+)?)(.*)$/); if (!m) return null;
+    var o = {v: Number(m[3]) * (m[2] === '-' ? -1 : 1), sign: m[2] || '', u: m[1] ? 'USD' : null}, rest = m[4], u;
+    if ((u = rest.match(/^(%p|%포인트|%|퍼센트|퍼|프로|포인트|p)/i))) { o.u = 'PCT'; o.pp = /p|포인트/i.test(u[1]); rest = rest.slice(u[1].length); }
+    else if ((u = rest.match(/^(억원|억|만원|만|천원|천|원)/))) { o.u = 'KRW'; o.v *= {'억원': 1e8, '억': 1e8, '만원': 1e4, '만': 1e4, '천원': 1e3, '천': 1e3, '원': 1}[u[1]]; rest = rest.slice(u[1].length); }
+    else if ((u = rest.match(/^(달러|불|usd)/i))) { o.u = 'USD'; rest = rest.slice(u[1].length); }
+    var p = rest.match(/^(에서|에|으로|로|씩|까지|만큼|정도|쯤|이|가|은|는|을|를|)$/);
+    if (!p) return null;
+    o.pt = p[1]; return o;
+  }
+  // 사유·이유·메모 문장은 입력 그대로 떼어 둔다(명령 해석 대상 아님)
+  var TAILS = [/\s*(이?라고|으?로)\s*(기록|적어|저장|남겨|넣어|해|써|추가|덧붙|바꿔|변경|수정)\S*\s*[.!]?$/, /\s+(기록|적어|저장|남겨|추가|덧붙|바꿔|변경|수정)(해|해줘|해주세요|줘|주세요|둬|하자)?\s*[.!]?$/, /\s*이?라고\s*[.!]?$/];
+  function cutReason(s){
+    var m = s.match(/(편출\s*사유|추천\s*사유|사유|이유|메모)\s*(?:를|을|는|은|에|로|으로|도)?\s*(?:(추가|덧붙여|덧붙|바꿔|변경|수정|교체)\S*)?\s*[:：=]?\s*/);
+    if (!m) return null;
+    var body = s.slice(m.index + m[0].length).trim(), how = m[2] && /추가|덧붙/.test(m[2]) ? 'append' : 'replace';
+    var hw = s.slice(0, m.index).trim().split(/\s+/);   // '좋게 보는 이유는' — 사유를 꾸미는 앞말은 명령이 아니다
+    for (var z = 0; z < 3 && hw.length > 1; z++) { var lw = hw[hw.length - 1], kk = kw(lw); if (kk && kk !== 'QR' && kk !== 'QS') break; if (kk === 'QR' || /(는|은|한|할|던|게|적으로|다고)$/.test(lw)) hw.pop(); else break; }
+    var head = hw.join(' '), q = body.match(/^["“'‘](.+?)["”'’]\s*/), tx = q ? q[1] : body, rest = q ? body.slice(q[0].length) : body;
+    for (var i = 0; i < TAILS.length; i++) { var tm = rest.match(TAILS[i]); if (tm) { if (/추가|덧붙/.test(tm[0])) how = 'append'; if (!q) tx = rest.slice(0, tm.index); break; } }
+    tx = tx.trim();
+    if (/^(보여|알려|뭐|확인|조회)/.test(tx) || /\?$/.test(body)) return {query: true, head: head};
+    if (/^(좀\s*)?(다듬|고쳐|요약|자연스럽|매끄럽|깔끔하게|정리해)/.test(tx)) return {polish: true, head: head};
+    if (!tx) return null;
+    return {kind: /편출/.test(m[1]) ? 'exit' : /추천/.test(m[1]) ? 'add' : 'any', text: tx, how: how, head: head};
+  }
+  // MP 전체 비우기(D-21) — 정해진 말로만 된 문장일 때만(대상 말 + 동사 + '전부/다'류, 비워·초기화는 그 자체로 전체). 관심·일부('빼고'·시장·종목명)·부정·질문이면 아님
+  var CL_T = /^(mp|엠피|모델|포트폴리오|포폴|구성|보유|종목|종목들)$/i, CL_A = /^(전부|전체|모두|모든|다|싹|싹다|몽땅|일괄|죄다|전량|통째로|한꺼번에|한번에)$/;
+  var CL_V = /^(없애|비워|비우|삭제|편출|빼|뺴|정리|청산|제거|지워|지우|날려|털어|초기화|리셋|매도|팔아)(해|해줘|해주세요|해라|하자|하기|해버려|시켜|시켜줘|줘|주세요|라|라고|자|요|해요|버려|버려줘|버리자|기|합시다|할게|해봐)?$/;
+  var CL_F = /^(현재|지금|내|우리|그|거|것|것들|좀|그냥|일단|이제|오늘|있는|들어있는|들어간|담긴|담은|편입된|편입|해|해줘|줘|주세요|요)$/;
+  function clearOf(s){
+    if (/[?？]/.test(s) || /(관심|관종|워치|찜)/.test(s) || /(말고|빼고|제외하고|지\s*마|지마|말아|않|안\s*(해|돼|할))/.test(s)) return false;
+    var ws = s.replace(/[.!~,]+/g, ' ').split(/\s+/).filter(Boolean), n = {T: 0, A: 0, V: 0, E: 0};
+    var cls = function(w){ return CL_T.test(w) ? 'T' : CL_A.test(w) ? 'A' : CL_V.test(w) ? (/^(비워|비우|초기화|리셋)/.test(w) ? 'E' : 'V') : CL_F.test(w) ? 'F' : null; };
+    for (var i = 0; i < ws.length; i++) {
+      var w = ws[i].toLowerCase(), sw = strip(w), c = cls(w) || cls(sw);
+      if (c) { n[c] = (n[c] || 0) + 1; continue; }
+      for (var j = 1; j < sw.length && !c; j++) { var c1 = cls(sw.slice(0, j)), c2 = c1 && cls(sw.slice(j)); if (c2) { n[c1] = (n[c1] || 0) + 1; n[c2] = (n[c2] || 0) + 1; c = 1; } }   // 'MP구성' · '다없애'
+      if (!c) return false;
+    }
+    return n.T > 0 && (n.E > 0 || (n.V > 0 && n.A > 0));
+  }
+  function parse(text){
+    var raw = String(text || '').trim();
+    if (!raw) return {fail: '명령을 입력하세요.'};
+    if (/^(도움말|도움|help|\?|명령어|사용법|예시)$/i.test(raw)) return {cmds: [{op: 'HELP'}]};
+    var rs = cutReason(raw), s = rs ? rs.head : raw;
+    if (rs && rs.polish) return {fail: '사유는 다듬지 않습니다 — 사유 문장을 직접 적어주세요(적은 그대로 저장).'};
+    if (!(rs && rs.query) && clearOf(s)) return rs && rs.kind === 'add' ? {fail: '전체 비우기에는 추천사유가 아니라 편출사유를 적습니다.'} : {cmds: [{op: 'MP_CLEAR', memo: rs ? rs.text : ''}]};
+    s = s.replace(/(\d),(?=\d{3}(\D|$))/g, '$1').replace(/([가-힣a-zA-Z])(\$?\d)/g, '$1 $2').replace(/(관심(?:종목)?|mp|MP)(추가|편입|해제|삭제|제외|등록|넣|빼|목록)/g, '$1 $2').replace(/[?？!.]+/g, ' ');
+    var words = s.split(/[\s,;·]+/).filter(Boolean), T = [], unk = [];
+    for (var i = 0; i < words.length; i++) {
+      var hit = null, n = 0;
+      for (var L = Math.min(4, words.length - i); L >= 2 && !hit; L--) { var ph = words.slice(i, i + L); var x = NLX.exact(ph.join(' ')) || NLX.exact(ph.join('')) || NLX.exact(strip(ph.join(''))); if (x) { hit = x; n = L; } }
+      if (hit) { T.push({t: 'A', a: hit}); i += n - 1; continue; }
+      var w = words[i], sw = strip(w), prevK = T.length && T[T.length - 1].t === 'K' ? T[T.length - 1].k : null;
+      if (ALIAS[w] || ALIAS[sw] || KO_US[w] || KO_US[sw]) { T.push({t: 'A', a: NLX.exact(ALIAS[w] || KO_US[w] ? w : sw)}); continue; }
+      var nt = numTok(w), ex = !/^(mp|etf)$/i.test(sw) && (NLX.exact(w) || NLX.exact(sw));
+      if (nt && !(ex && /^\d{6}$/.test(w) && prevK !== 'STOP' && prevK !== 'PX')) { T.push({t: 'N', n: nt}); continue; }
+      if (ex) { T.push({t: 'A', a: ex}); continue; }
+      var k = kw(w) || kw(sw);
+      if (k && (k === 'SET' || k === 'ADD') && (prevK === 'STOP' || prevK === 'PX')) continue;   // '손절가 설정 80만원' — 가격을 적는 말일 뿐
+      if (k) { T.push({t: 'K', k: k, w: w}); continue; }
+      if (FILL.test(w) || FILL.test(strip(w))) continue;
+      T.push({t: 'U', w: strip(w) || w});
+    }
+    if (rs && rs.query) T.push({t: 'K', k: 'WHY', w: '사유'});
+    var has = function(k){ return T.some(function(x){ return x.t === 'K' && x.k === k; }); };
+    var verb = ['ADD', 'REM', 'UP', 'DOWN', 'SET'].some(has);
+    var mks = T.filter(function(x){ return x.k === 'MKT'; }).map(function(x){ var w = x.w.toLowerCase(); return /한국|국내/.test(w) ? 'KR' : /미국|해외/.test(w) ? 'US' : w === 'etf' ? 'ETF' : 'STOCK'; });
+    var assets = T.filter(function(x){ return x.t === 'A'; }).map(function(x){ return x.a; });
+    // 조회(아무것도 바꾸지 않음) — '좋은 거·추천·순위'는 변경 동사가 있어도 조회로만
+    if (has('QR')) { var cnt = T.filter(function(x){ return x.t === 'N' && !x.n.u; })[0];   // 'RS 상위 5' — RS는 찾을 말이 아니고 5는 보여줄 개수
+      return {cmds: [{op: 'Q_RANK', topic: T.filter(function(x){ return x.t === 'U' && !/^(rs|알에스|상대강도)$/i.test(x.w); }).map(function(x){ return x.w; }).concat(assets.map(function(a){ return a.name || a.q || ''; })), mks: mks, note: verb, n: cnt ? cnt.n.v : null}]}; }
+    if (has('WHY') || (has('QS') && !verb) || (!verb && !assets.length && !T.some(function(x){ return x.t === 'N' || x.t === 'U'; }) && (has('HOLD') || has('MP') || has('WATCH')))) {
+      var qa = assets.slice(), qu = [];
+      T.forEach(function(x){ if (x.t !== 'U') return; var f = NLX.find(x.w); if (f.one) qa.push(f.one); else if (f.many) qa.push({q: x.w, cands: f.many, more: f.more}); else qu.push(x.w); });
+      if (qu.length) return {fail: '조회할 종목을 찾지 못했습니다.', unknown: qu};
+      if (qa.length) return {cmds: qa.map(function(a){ return {op: 'Q_WHY', a: a}; })};
+      if (has('WHY')) return {fail: '어느 종목인지 이름을 적어주세요(예: 하닉 왜 들어가 있어?).'};
+      return {cmds: [{op: has('WATCH') && !has('MP') ? 'Q_WATCH' : 'Q_MP'}]};
+    }
+    // 이름 일부로 쓴 종목(하이닉스 등) — 후보가 없으면 모르는 말
+    T.forEach(function(x){ if (x.t !== 'U') return; var f = NLX.find(x.w); if (f.one) { x.t = 'A'; x.a = f.one; x.via = x.w; } else if (f.many) { x.t = 'A'; x.a = {q: x.w, cands: f.many, more: f.more}; } else unk.push(x.w); });
+    if (unk.length) return {fail: '규칙으로 안전하게 해석하지 못한 말이 있습니다.', unknown: unk};
+    // 종목 기준으로 나눈다: 종목 하나 = 한 덩어리, 덩어리 안에서 동사마다 명령 하나
+    var segs = [], cur = null, lead = [];
+    T.forEach(function(x){ if (x.t === 'A') { cur = {a: x.a, via: x.via, toks: []}; segs.push(cur); } else if (cur) cur.toks.push(x); else lead.push(x); });
+    if (!segs.length) return {fail: '종목을 찾지 못했습니다.'};
+    segs[0].toks = lead.concat(segs[0].toks);
+    var isV = function(x){ return x.t === 'K' && ['ADD', 'REM', 'UP', 'DOWN', 'SET'].indexOf(x.k) >= 0; };
+    for (var j = segs.length - 2; j >= 0; j--) {   // 동사 없는 덩어리는 뒤 덩어리의 동사·범위를 이어받는다('삼전 10, 하닉 5로 맞춰')
+      var sg = segs[j], nx = segs[j + 1];
+      if (sg.toks.some(isV) || sg.toks.some(function(x){ return x.k === 'STOP' || x.k === 'PX'; })) continue;
+      var vi = -1; nx.toks.forEach(function(x, q){ if (vi < 0 && isV(x)) vi = q; }); if (vi < 0) continue;
+      var inh = nx.toks.slice(0, vi + 1).filter(function(x){ return x.t === 'K'; });
+      if (!sg.toks.some(function(x){ return x.t === 'N'; })) { var nn = nx.toks.filter(function(x){ return x.t === 'N' && x.n.pt === '씩'; })[0]; if (nn) inh.unshift(nn); }
+      sg.toks = sg.toks.concat(inh);
+    }
+    var cmds = [], err = null;
+    segs.forEach(function(sg){
+      var parts = [], p = [];
+      sg.toks.forEach(function(x){ p.push(x); if (isV(x)) { parts.push(p); p = []; } });
+      if (p.length) { if (parts.length && !p.some(function(x){ return x.k === 'STOP' || x.k === 'PX' || x.t === 'N'; })) parts[parts.length - 1] = parts[parts.length - 1].concat(p); else parts.push(p); }
+      if (!parts.length) parts.push([]);
+      parts.forEach(function(pt){ var c = partCmd(sg, pt); if (c.err) err = err || c.err; else cmds.push(c); });
+    });
+    if (err) return {fail: err};
+    if (rs) {   // 사유 문장 붙이기: 편출사유 → 편출, 추천사유 → 편입·사유 수정, 그냥 사유/이유 → 사유가 필요한 명령 하나
+      var tgt = cmds.filter(function(c){ return rs.kind === 'exit' ? c.op === 'MP_REMOVE' : rs.kind === 'add' ? c.op === 'MP_ADD' : c.op === 'MP_ADD' || c.op === 'MP_REMOVE'; });
+      if (!tgt.length && rs.kind !== 'exit') tgt = cmds.filter(function(c){ return c.op === 'WATCH_ADD'; });
+      if (tgt.length > 1) return {fail: '사유를 어느 종목에 붙일지 모르겠습니다 — 종목마다 따로 입력하세요.'};
+      if (tgt.length) { tgt[0].memo = rs.text; tgt[0].how = rs.how; }
+      else if (cmds.length === 1 && (cmds[0].op === 'NONE')) { cmds[0].op = rs.kind === 'exit' ? 'MP_REMOVE' : 'MEMO'; cmds[0].memo = rs.text; cmds[0].how = rs.how; }   // '엔비 편출 사유는 …' = 편출(D-20: 전에는 추천사유로 잘못 감)
+      else if (segs.length === 1 && !cmds.some(function(c){ return c.op !== 'NONE' && c.op !== 'MARK'; })) cmds.push({op: 'MEMO', a: segs[0].a, memo: rs.text, how: rs.how});
+      else return {fail: '사유 문장을 어디에 쓸지 모르겠습니다.'};
+    }
+    cmds = cmds.filter(function(c){ return c.op !== 'NONE'; });
+    if (!cmds.length) return {fail: '무엇을 할지(편입·편출·비중·관심·손절가·지정가) 찾지 못했습니다.'};
+    return {cmds: cmds};
+  }
+  function partCmd(sg, pt){
+    var ks = function(k){ return pt.some(function(x){ return x.k === k; }); }, a = sg.a;
+    var vw = (pt.filter(function(x){ return x.t === 'K' && ['ADD', 'REM', 'UP', 'DOWN', 'SET'].indexOf(x.k) >= 0; })[0] || {});
+    var c = {op: 'NONE', a: a, via: sg.via}, stop = null, px = null, pc = null, price = [];
+    for (var i = 0; i < pt.length; i++) {
+      var x = pt[i];
+      if (x.t === 'K' && (x.k === 'STOP' || x.k === 'PX')) {
+        var jn = i + 1; while (jn < pt.length && pt[jn].t === 'K' && ['SET', 'ADD'].indexOf(pt[jn].k) >= 0) jn++;
+        var nx = pt[jn];
+        if (nx && nx.t === 'N' && nx.n.u !== 'PCT') { if (x.k === 'STOP') stop = nx.n; else px = nx.n; pt.splice(jn, 1); }
+        else if (vw.k === 'REM') { if (x.k === 'STOP') stop = {v: 0}; else px = {v: 0}; }
+        else return {err: (x.k === 'STOP' ? '손절가' : '지정가') + ' 가격을 찾지 못했습니다(예: 손절가 80만원, $150).'};
+      } else if (x.t === 'N') {
+        if (x.n.u === 'KRW' || x.n.u === 'USD') price.push(x.n); else if (!pc) pc = x.n; else return {err: '숫자가 너무 많습니다 — 종목마다 비중 하나씩.'};
+      } else if (x.t === 'K' && x.k === 'PROP') c.mode = 'prop'; else if (x.t === 'K' && x.k === 'EQ') c.mode = 'eq'; else if (x.t === 'K' && x.k === 'CASH') c.mode = 'cash'; else if (x.t === 'K' && x.k === 'SOFT') c.soft = true;
+    }
+    if (price.length) {   // '162만원에 편입' = 지정가(추천가는 그대로 자동)
+      if (price.length === 1 && price[0].pt === '에' && vw.k === 'ADD' && !px) px = price[0];
+      else return {err: '가격 ' + price.map(function(n){ return n.v.toLocaleString(); }).join(', ') + '이(가) 손절가인지 지정가인지 모르겠습니다 — "손절가 …" / "지정가 …"로 적어주세요.'};
+    }
+    if (stop) c.stop = stop; if (px) c.px = px;
+    var watch = ks('WATCH'), mp = ks('MP') || /편입|편출|매수|매도|청산|정리/.test(vw.w || '');
+    var pctTo = pc && (pc.pt === '로' || pc.pt === '으로' || pc.pt === '까지');
+    if (vw.k === 'ADD') {
+      if (watch && !mp) c.op = 'WATCH_ADD';
+      else if (pc || mp) { c.op = 'MP_ADD'; if (pc) c.w = pc.v; }
+      else if (stop || px) c.op = 'MARK';   // '손절가 80만원 추가'
+      else c.op = 'ADD_ANY';
+    } else if (vw.k === 'REM') {
+      if (stop || px) c.op = 'MARK';
+      else if (watch && !mp) c.op = 'WATCH_REMOVE'; else if (mp) c.op = 'MP_REMOVE'; else c.op = 'DEL_ANY';
+    } else if (vw.k === 'UP' || vw.k === 'DOWN') {
+      if (pc && pctTo) { c.op = 'MP_SET'; c.w = pc.v; }
+      else if (pc) { c.op = 'MP_DELTA'; c.dw = Math.abs(pc.v) * (vw.k === 'DOWN' ? -1 : 1); }
+      else { c.op = 'MP_DELTA'; c.soft = true; c.dir = vw.k === 'DOWN' ? -1 : 1; }
+    } else if (vw.k === 'SET') {
+      if (pc && (pc.sign || pc.pp)) { c.op = 'MP_DELTA'; c.dw = pc.v; }   // '+2%' · '2%p' = ±%p
+      else if (pc) { c.op = 'MP_SET'; c.w = pc.v; } else if (stop || px) c.op = 'MARK'; else c.op = 'NONE';
+    } else {
+      if (stop || px) c.op = pc ? 'MP_ANY' : 'MARK';
+      if (pc && (pc.sign || pc.pp)) { c.op = 'MP_DELTA'; c.dw = pc.v; }
+      else if (pc) { c.op = pctTo ? 'MP_SET' : 'MP_ANY'; c.w = pc.v; }
+    }
+    if (c.op === 'MP_ANY' || c.op === 'MP_ADD' || c.op === 'MP_SET') { if (c.w != null && pc && pc.pp && c.op !== 'MP_SET') return {err: '%p는 늘려/줄여와 같이 쓰세요.'}; }
+    return c;
+  }
+  return {name: 'rules', parse: parse, num: numTok, strip: strip, clearWord: function(w){ return CL_T.test(w) || CL_A.test(w); }};
+})();
+
+// ---- AI 해석기(D-20, Gemini) — 문장 → 명령 JSON만 만든다. AI는 MP·관심·기록을 읽지도 쓰지도 않는다.
+// 호출은 관리자 전용 중계(Google Apps Script, 주소 = STORE.ai)로만: 로그인 토큰을 보내면 중계가 관리자 UID를 확인하고 Gemini를 부른다. API 키는 중계의 스크립트 속성에만.
+// 보내는 것 = 입력한 명령 문장(AI가 되물었으면 직전 문장·질문·답까지)뿐. MP 구성·관심·손절가·메모·기록은 보내지 않는다.
+// 결과는 aiCmds가 검사한다: 명령 종류 · 종목 = 입력에 쓴 말을 사이트 목록(NLX)으로 찾기(코드는 AI가 정하지 않음) · 비중·가격·사유 = 입력에 있는 그대로만.
+// 검사를 못 넘거나 호출이 실패하면 규칙 해석으로 다시 한다. 둘 다 안 되면 안내만(아무것도 안 바꿈).
+var AI_URL = (STORE && typeof STORE.ai === 'string' && STORE.ai) || '';
+function aiOn(){ return !!AI_URL && lsGet('rs_nl_ai') !== 'off'; }
+var AI_OPS = ['MP_ADD', 'MP_REMOVE', 'MP_CLEAR', 'MP_SET', 'MP_DELTA', 'WATCH_ADD', 'WATCH_REMOVE', 'ADD_ANY', 'DEL_ANY', 'MARK', 'MEMO', 'Q_MP', 'Q_WATCH', 'Q_WHY', 'Q_RANK'];
+// 응답 형식(JSON 모양)은 아래 설명 + aiCmds 검사로 강제한다. Gemini의 responseSchema는 쓰지 않는다 — 9/26 실측: flash-lite가 숫자 칸에서 같은 글자를
+// 반복(2.0000…E000…)하거나 가격을 비중 칸에 넣는 등 깨진 값을 냄. 스키마 없이 JSON 모드 + 숫자를 문자열로 받으면 QA 19문장 전부 정상.
+var AI_SYS = [
+  '너는 투자 모델 포트폴리오(MP) 관리자 화면의 명령 해석기다. 관리자가 쓴 한국어 명령을 JSON 하나로 옮기기만 한다. 실행·추천·의견·설명은 하지 않는다.',
+  '[출력] {"status":"ok"|"ask"|"unknown","question":"…","commands":[{op, stock, weight, delta, limit, stop, reason, reason_mode, mode, topic, markets, count}]} — 쓰지 않는 필드는 뺀다.',
+  '[필드]',
+  'stock = 관리자가 쓴 종목 표현 그대로(조사만 뺌. 예: 하닉, 삼전, SK이노베이션). 종목 코드를 만들지 않는다.',
+  'weight = 목표·편입 비중 %의 숫자만 문자열로("3"). delta = 비중 증감 %p 숫자만 문자열로(늘리면 "2", 줄이면 "-1.5"). count = 보여줄 개수 문자열.',
+  'limit = 지정가(편입 희망 가격) 원문("162만원"). stop = 손절가 원문("160만원"). 가격은 weight에 넣지 않는다. 가격을 지우라면 "DELETE".',
+  'reason = "사유는/이유는/메모" 뒤 문장 원문 그대로(다듬기·요약 금지). reason_mode = 덧붙이면 "append".',
+  'markets = ["KR","US","ETF","STOCK"] 중 말한 것만. topic = 업종·테마 단어.',
+  '[op]',
+  'MP_ADD 편입(비중을 말하며 넣어/담아도 MP_ADD) · MP_REMOVE 편출(포트폴리오/MP에서 빼) · MP_SET 목표 비중으로 맞춤("5%로") · MP_DELTA 지금 비중에서 ±%p(delta 필수)',
+  'WATCH_ADD / WATCH_REMOVE 관심 추가/삭제 · ADD_ANY / DEL_ANY "넣어"/"빼"인데 MP·관심을 말하지 않고 비중도 없음',
+  'MARK 손절가·지정가만 설정/삭제 · MEMO 이미 있는 종목의 사유만 바꿈',
+  'MP_CLEAR MP의 모든 종목 편출("MP 전부 비워", "포트폴리오 전체 삭제", "현재 종목 모두 빼") — stock·weight 없이 op 하나만(사유를 말했으면 reason). 대상 종목은 화면이 현재 MP에서 정하고 확인 질문도 화면이 하므로 status "ok". 관심 목록이거나 일부만("하닉 빼고 전부", "미국 종목 전부")이면 MP_CLEAR가 아니다.',
+  'Q_MP 현재 MP 보기 · Q_WATCH 관심 목록 보기 · Q_WHY 종목이 왜 들어갔는지(stock) · Q_RANK RS 순위(topic, markets, count)',
+  'mode는 관리자가 "현금에서"(cash)·"비례로"(prop)·"동일 비중"(eq)이라고 직접 말했을 때만.',
+  '[규칙] 문장에 없는 것은 만들지 않는다. 대상 종목·숫자·방향이 불분명하면("좀 줄여", "그거 빼", "많이 늘려") 추측하지 말고 status "ask"와 짧은 질문. 추천·의견·예측·잡담은 status "unknown". 여러 동작은 순서대로 여러 명령. 입력이 "직전 명령 / 해석기 질문 / 관리자 답"이면 합쳐 해석(답이 "예·네·응·ㅇㅇ·맞아"면 질문에 동의한 것).',
+  '[예]',
+  '"하닉 162만원에 2% 편입하고 손절가 160만원" → {"status":"ok","commands":[{"op":"MP_ADD","stock":"하닉","weight":"2","limit":"162만원","stop":"160만원"}]}',
+  '"삼전 10, 하닉 5로 맞춰" → {"status":"ok","commands":[{"op":"MP_SET","stock":"삼전","weight":"10"},{"op":"MP_SET","stock":"하닉","weight":"5"}]}',
+  '"하닉 1.5%p 줄여" → {"status":"ok","commands":[{"op":"MP_DELTA","stock":"하닉","delta":"-1.5"}]}',
+  '"엔비 편출 사유는 추세 약화" → {"status":"ok","commands":[{"op":"MP_REMOVE","stock":"엔비","reason":"추세 약화"}]}',
+  '"MP 구성 전부 다 없애" → {"status":"ok","commands":[{"op":"MP_CLEAR"}]}',
+  '"하닉 좀 줄여" → {"status":"ask","question":"하닉 비중을 몇 %로 할까요?"}'].join('\n');
+var AIQ = null, AIBUSY = false;   // AI가 되물은 질문(다음 입력 한 번만 이어서 해석) · 해석 중
+var AIERR = {auth: '관리자 확인 실패', nokey: '중계에 API 키가 없음', rate: '분당 호출 한도', quota: 'Gemini 무료 한도 초과', timeout: '응답 시간 초과', json: 'AI 응답이 JSON이 아님',
+  invalid: 'AI 결과가 검사를 통과하지 못함', network: '통신 오류', redirect: '중계 연결 끊김', server: '중계 서버 오류', bad_request: '요청 형식 오류'};
+function aiErrTxt(e){ return AIERR[e] || (/^gemini_\d+$/.test(e) ? 'Gemini 오류 ' + e.slice(7) : /^http_\d+$/.test(e) ? '중계 응답 ' + e.slice(5) : '알 수 없는 오류'); }
+function aiPost(body, ms){   // 통신 실패·시간 초과·중계 404/5xx는 한 번만 다시(Apps Script 웹 앱은 가끔 리디렉션 단계에서 실패 — 9/26 실측 12번 중 3번)
+  return aiPost1(body, ms).catch(function(x){ if (!/^(network|timeout|redirect|http_404|http_5\d\d)$/.test(x.message)) throw x; return aiPost1(body, ms); });
+}
+function aiPost1(body, ms){
+  return idToken().catch(function(){ throw new Error('auth'); }).then(function(tok){
+    body.token = tok;
+    var ctl = typeof AbortController === 'function' ? new AbortController() : null, tm = null;
+    var to = new Promise(function(_, no){ tm = setTimeout(function(){ no(new Error('timeout')); if (ctl) ctl.abort(); }, ms || 20000); });
+    var go = fetch(AI_URL, {method: 'POST', body: JSON.stringify(body), signal: ctl ? ctl.signal : undefined})   // 본문 text/plain — 사전 확인 요청 없이 보낸다
+      .then(function(r){ if (!r.ok) throw new Error('http_' + r.status); return r.json().catch(function(){ throw new Error('server'); }); },
+            function(){ throw new Error('network'); })
+      .then(function(j){ if (!j || j.ok !== true) throw new Error((j && typeof j.err === 'string' && /^[a-z_0-9]{1,30}$/.test(j.err) && j.err) || 'server'); return j; });
+    return Promise.race([go, to]).then(function(j){ clearTimeout(tm); return j; }, function(x){ clearTimeout(tm); throw x; });
+  });
+}
+function aiItem(s){   // 입력에 쓴 종목 표현 → 사이트 목록의 종목(정확히 하나) · 후보 여럿이면 질문 · 없으면 null
+  var t = [s, RULES.strip(s)], i, x;
+  for (i = 0; i < 2; i++) { x = t[i] && NLX.exact(t[i]); if (x) return x.many ? {q: s, cands: x.many.slice(0, 6), more: x.many.length > 6 ? x.many.length : 0} : x; }
+  for (i = 0; i < 2; i++) { x = NLX.find(t[i]); if (x.one) return x.one; if (x.many) return {q: t[i], cands: x.many, more: x.more}; }
+  return null;
+}
+// AI 결과 검사 → {cmds} · {ask} · {notCmd} · {fail}. 형식이 틀리면 Error('invalid')(→ 규칙 해석). ut = 관리자가 쓴 말만(AI 질문 제외)
+// yq = 관리자가 '예'로 동의한 AI 질문 — 전체 비우기의 대상 말('MP 전체')을 질문에서만 확인할 때 쓴다(종목·숫자·가격은 여전히 ut에서만)
+function aiCmds(j, ut, yq){
+  var bad = function(why){ var e = new Error('invalid'); e.why = why; throw e; };
+  if (Array.isArray(j) && j.length === 1) j = j[0];   // [{…}]로 감싸 오는 경우
+  if (!j || typeof j !== 'object' || Array.isArray(j)) bad('형식');
+  if (j.status === 'ask') { var q = String(j.question || '').replace(/\s+/g, ' ').trim(); if (!q || q.length > 200) bad('질문 형식'); return {ask: q}; }
+  if (j.status === 'unknown') return {notCmd: true};
+  if (j.status !== 'ok' || !Array.isArray(j.commands) || !j.commands.length || j.commands.length > 12) bad('명령 목록');
+  var flat = nkey(ut).replace(/,/g, ''), nums = (ut.replace(/(\d),(?=\d{3})/g, '$1').match(/\d+(?:\.\d+)?/g) || []).map(Number);
+  var inUt = function(s){ var k = nkey(s).replace(/,/g, ''); return !!k && flat.indexOf(k) >= 0; };
+  var said = function(v){ return nums.some(function(n){ return Math.abs(n - Math.abs(v)) < 1e-9; }); };
+  var isNum = function(v){ return typeof v === 'number' && isFinite(v); };
+  var numOf = function(v){ return typeof v === 'string' && /^\s*[+-]?\d+(\.\d+)?\s*$/.test(v) ? Number(v) : v; };   // 숫자는 문자열로 받는다("3")
+  var given = function(v){ return v != null && v !== ''; };
+  var cmds = [], unk = [], unit = [];
+  j.commands.forEach(function(o){
+    if (!o || typeof o !== 'object') bad('명령 형식');
+    var op = o.op, c = {op: op};
+    if (AI_OPS.indexOf(op) < 0) bad('명령 종류 ' + op);
+    if (op === 'MP_CLEAR') {   // 전체 비우기(D-21) — 단독 · 종목·숫자 없음 · 문장에 동사·전체가 있고 관심·일부·종목명·부정·다른 대상이 없을 때만. 대상 종목은 nlNext가 현재 MP에서 정하고 '포트폴리오의 모든 종목…' 확인을 반드시 거친다
+      if (j.commands.length !== 1) bad('전체 비우기는 단독으로만');
+      ['stock', 'weight', 'delta', 'limit', 'stop', 'mode', 'topic', 'count'].forEach(function(f){ if (given(o[f])) bad('전체 비우기에 ' + f); });
+      if (o.reason != null && o.reason !== '') { var cm = String(o.reason).trim(); if (!cm || ut.indexOf(cm) < 0) bad('사유가 입력과 다름'); c.memo = cm; }
+      var cu = (c.memo ? ut.split(c.memo).join(' ') : ut) + (yq ? ' ' + yq : '');   // 사유 문장 안의 말은 검사에서 뺀다
+      if (!/(없애|비워|비우|삭제|편출|빼|뺴|정리|청산|제거|지워|지우|날려|털어|초기화|리셋|매도|팔아)/.test(cu)
+        || !(/(전부|전체|모두|모든|싹|몽땅|일괄|죄다|전량|통째|한꺼번에|한번에|비워|비우|초기화|리셋)/.test(cu) || /(^|\s)다(\s|없애|비워|정리|빼|삭제|편출|지워|날려|털어|팔아|$)/.test(cu))) bad('전체 비우기 문장 아님');
+      if (!/(mp|엠피|모델|포트폴리오|포폴|구성|보유|종목)/i.test(cu) && /(메모|사유|이유|손절|스탑|스톱|지정가|가격|기록|이력|설정|링크|사이트|글)/.test(cu)) bad('MP가 아닌 대상 — 전체 비우기 아님');   // '전부 다 없애'(대상 생략)는 확인 질문으로
+      if (/(관심|관종|워치|찜)/.test(cu) || /(말고|빼고|제외하고|지\s*마|지마|말아|않|안\s*(해|돼|할))/.test(cu) || /(한국|국내|미국|해외|etf|코인|암호|주식)/i.test(cu)) bad('관심·일부·부정 — 전체 비우기 아님');
+      if (cu.split(/[\s,·]+/).some(function(w){ var sw = RULES.strip(w); return !!sw && !RULES.clearWord(sw.toLowerCase()) && !!(NLX.exact(w) || NLX.exact(sw)); })) bad('종목 이름이 있음 — 전체 비우기 아님');
+      cmds.push(c); return;
+    }
+    if (!/^(Q_MP|Q_WATCH|Q_RANK)$/.test(op)) {
+      var st = typeof o.stock === 'string' ? o.stock.trim() : '';
+      if (!st || st.length > 40) bad('종목 없음');
+      if (!inUt(st)) bad('입력에 없는 종목 ' + st);
+      c.a = aiItem(st); if (!c.a) { unk.push(st); return; }
+    }
+    var wv = numOf(o.weight), dv = numOf(o.delta);
+    if (given(o.weight)) { if (!/^(MP_ADD|MP_SET|ADD_ANY)$/.test(op) || !isNum(wv) || !(wv > 0 && wv <= 100) || !said(wv)) bad('비중'); c.w = wv; }
+    if (given(o.delta)) { if (op !== 'MP_DELTA' || !isNum(dv) || !dv || Math.abs(dv) > 100 || !said(dv)) bad('비중 변화'); c.dw = dv; }
+    if (op === 'MP_SET' && c.w == null) bad('목표 비중 없음');
+    if (op === 'MP_DELTA' && c.dw == null) bad('비중 변화 없음');
+    if (op === 'ADD_ANY' && c.w != null) c.op = 'MP_ADD';
+    ['stop', 'limit'].forEach(function(f){
+      if (o[f] == null || o[f] === '') return;
+      if (!/^(MP_ADD|MP_SET|MP_DELTA|WATCH_ADD|ADD_ANY|MARK)$/.test(op)) bad('가격 위치');
+      var raw = String(o[f]).trim(), n;
+      if (raw === 'DELETE') { if (!/(삭제|지워|지우|없애|제거|빼|해제|취소)/.test(ut)) bad('가격 삭제'); n = {v: 0}; }
+      else {
+        if (!inUt(raw)) bad('입력에 없는 가격 ' + raw);
+        n = RULES.num(raw.replace(/[\s,]/g, ''));
+        if (!n || n.u === 'PCT' || !(n.v > 0)) bad('가격 형식 ' + raw);
+        if (!n.u) unit.push((f === 'stop' ? '손절가 ' : '지정가 ') + raw);
+      }
+      c[f === 'stop' ? 'stop' : 'px'] = n;
+    });
+    if (op === 'MARK' && !c.stop && !c.px) bad('가격 없음');
+    if (o.reason != null && o.reason !== '') {
+      var m = String(o.reason).trim();
+      if (!/^(MP_ADD|MP_REMOVE|WATCH_ADD|ADD_ANY|DEL_ANY|MEMO)$/.test(op)) bad('사유 위치');
+      if (!m || ut.indexOf(m) < 0) bad('사유가 입력과 다름');
+      c.memo = m; c.how = o.reason_mode === 'append' ? 'append' : 'replace';
+    }
+    if (op === 'MEMO' && !c.memo) bad('사유 없음');
+    if (o.mode) { var mr = {cash: /현금/, prop: /비례/, eq: /동일|균등|똑같/}[o.mode]; if (!mr || !mr.test(ut)) bad('배분 방식'); c.mode = o.mode; }
+    if (op === 'Q_RANK') {
+      var tw = String(o.topic || '').split(/[\s,]+/).filter(function(w){ return w && !/^(rs|알에스|상대강도|순위|랭킹)$/i.test(w); });
+      c.topic = tw.filter(inUt); if (tw.length && !c.topic.length) bad('입력에 없는 주제');
+      c.mks = (Array.isArray(o.markets) ? o.markets : []).filter(function(x){ return /^(KR|US|ETF|STOCK)$/.test(x); });
+      var cv = numOf(o.count); if (given(o.count)) { if (!isNum(cv) || cv < 1 || cv > 50 || Math.round(cv) !== cv || !said(cv)) bad('개수'); c.n = cv; }
+    }
+    cmds.push(c);
+  });
+  if (unk.length) return {fail: '사이트 종목 목록에서 찾지 못했습니다 — 종목명이나 코드를 정확히 적어주세요.', unknown: unk};
+  if (unit.length) return {ask: unit.join(', ') + ' — 단위를 붙여 다시 적어주세요(예: 160만원, 16000원, $150).'};
+  return {cmds: cmds};
+}
+var NLHELP = /^(도움말|도움|help|\?|명령어|사용법|예시)$/i;
+// 되묻는 질문에 대한 짧은 답(D-21) — 1 = 예, -1 = 아니요/취소, 0 = 답이 아님(새 명령). 끝의 문장부호는 무시
+var NL_YES = /^(예|네|넹|넵|옙|네네|예예|응|웅|ㅇㅇ|ㅇ|ㅇㅋ|맞아|맞아요|맞습니다|맞음|맞다|그래|그래요|좋아|좋아요|확인|진행|진행해|진행해줘|yes|y|ok|okay|오케이)$/i;
+var NL_NO = /^(취소|그만|아니|아니요|아니오|아뇨|아닙니다|아니야|ㄴㄴ|ㄴ|no|n|노|싫어|안\s*해|하지\s*마|멈춰|중지)$/i;
+function ynOf(t){ var s = String(t || '').replace(/[\s.!~?？。,]+$/g, '').trim(); return NL_YES.test(s) ? 1 : NL_NO.test(s) ? -1 : 0; }
+// 해석: AI 켜짐 → AI → 검사 → (실패·검사 탈락이면) 규칙. prev = AI가 되물은 질문({ut, q}) — 답과 합쳐 한 번만 다시 해석
+function nlParse(text, prev){
+  var ut = prev ? prev.ut + '\n' + text : text, rut = prev && ynOf(text) > 0 ? prev.ut : ut;   // 되물음에 '예'만 답했으면 규칙은 앞 문장으로
+  var rules = function(note){ var r = RULES.parse(rut); r.via = 'rules'; r.ut = ut; if (note && !r.fail) r.note = note; return r; };
+  var r0 = rules(); if (r0.cmds && r0.cmds.length === 1 && r0.cmds[0].op === 'MP_CLEAR') return Promise.resolve(r0);   // 전체 비우기 문장(정해진 말)은 AI 없이
+  if (!aiOn() || NLHELP.test(text)) return Promise.resolve(rules());
+  var src = prev ? '직전 명령: ' + prev.ut + '\n해석기 질문: ' + prev.q + '\n관리자 답: ' + text : text;
+  return aiPost({mode: 'parse', system: AI_SYS, text: src}, 25000).then(function(j){
+    var o; try { o = JSON.parse(String(j.text || '')); } catch (e) { throw new Error('json'); }
+    var r = aiCmds(o, ut, prev && ynOf(text) > 0 ? prev.q : '');
+    if (r.notCmd) {   // AI가 명령이 아니라고 본 문장 — 규칙이 변경 명령으로 읽을 때만 규칙 결과(미리보기·승인은 그대로), 조회로 억지 해석하지 않는다
+      var rr = rules('AI는 관리 명령으로 보지 않았습니다 — 규칙으로 해석했습니다.');
+      return !rr.fail && rr.cmds.some(function(c){ return !/^Q_|HELP/.test(c.op); }) ? rr : {fail: '관리 명령으로 해석할 수 없는 문장입니다(추천·의견은 하지 않음) — 종목과 할 일(편입·편출·비중·관심·손절가·지정가·조회)을 적어주세요.', via: 'ai', ut: ut};
+    }
+    r.via = 'ai'; r.model = j.model || ''; r.ut = ut; return r;
+  }).catch(function(x){
+    var e = (x && x.message) || 'server', r = rules('AI 해석을 쓰지 못해(' + aiErrTxt(e) + (x && x.why ? ': ' + x.why : '') + ') 규칙으로 해석했습니다.');
+    if (r.fail) { r.aiErr = e; r.why = x && x.why; }
+    return r;
+  });
+}
+var NLP = {name: 'ai+rules', parse: nlParse};   // 해석 진입점(테스트·기록용 이름) — 실제 경로는 nlSubmit → nlParse
+
+// ---- 대화 · 질문 · 미리보기
+var NLM = [], DR = null, DSEQ = 0;   // 메시지(새로고침하면 사라짐) · 진행 중인 명령 · 번호
+var EXAMPLES = ['하닉 관심 추가', '삼전 관심 빼', '하닉 2% 편입 사유는 HBM 수요 개선', '하닉 162만원에 2% 편입하고 손절가 160만원', '삼전 2% 늘려', '하닉 5%로',
+  '삼전 10, 하닉 5로 맞춰', '엔비 편출 사유는 추세 약화', '하닉 빼고 SK이노베이션 3% 넣어', '하닉 손절가 80만원', '삼전 지정가 15만원', '하닉 손절가 삭제',
+  '현재 MP 보여줘', '관심 목록', '하닉 왜 들어가 있어?', '반도체 순위'];
+function nlSay(who, html, cls){ NLM.push({who: who, html: html, cls: cls || ''}); if (NLM.length > 40) NLM.shift(); nlDraw(); }
+function nlDraw(){
+  var el = $('#nll'); if (!el) return;
+  el.innerHTML = NLM.map(function(m){ return m.who === 'me' ? '<div class="nm me"><span>' + m.html + '</span></div>' : '<div class="nm sys ' + m.cls + '">' + m.html + '</div>'; }).join('');
+  el.querySelectorAll('[data-nok],[data-nedit],[data-ncancel],[data-nq]').forEach(function(b){   // 끝난 질문·미리보기의 버튼은 끈다
+    var id = b.dataset.nok || b.dataset.nedit || b.dataset.ncancel || b.dataset.dr; if (!DR || String(DR.id) !== id) b.disabled = true;
+    if (b.dataset.nq != null && (!DR || !DR.q || b.dataset.dq !== String(DR.qn))) b.disabled = true; });   // 이미 답한 질문의 선택지
+  el.querySelectorAll('[data-naq],[data-naqy]').forEach(function(b){ if (!AIQ || String(AIQ.id) !== (b.dataset.naq || b.dataset.naqy)) b.disabled = true; });   // 끝난 AI 질문
+  el.scrollTop = el.scrollHeight;
+  var i = $('#nli'); if (i) i.placeholder = DR && DR.q ? DR.q.ph : AIQ ? '답 입력(그만하려면 "취소")' : '예: 하닉 2% 편입 · 삼전 관심 추가 · 하닉 손절가 80만원 · 도움말';
+}
+function nlFail(msg, unk, aiErr, why){
+  nlSay('sys', (aiErr ? '<b>AI 해석을 사용할 수 없습니다. 기존 규칙으로 다시 시도하거나 명령을 더 구체적으로 입력하세요.</b><br><span class="mute">AI: ' + esc(aiErrTxt(aiErr) + (why ? ' — ' + why : '')) + ' · 규칙: </span>' : '') + esc(msg)
+    + (unk && unk.length ? ' <span class="mute">(모르는 말: ' + esc(unk.join(', ')) + ')</span>' : '')
+    + '<br>종목과 목표 비중을 구체적으로 입력해주세요. 예: ' + EXAMPLES.slice(0, 5).map(function(x){ return '<button type="button" class="lnk" data-nlx="' + esc(x) + '">' + esc(x) + '</button>'; }).join(' · ')
+    + ' · <button type="button" class="lnk" data-nlx="도움말">도움말</button>', 'bad');
+}
+function nameCode(a){ return esc(a.name || nameOf(a.type, a.code)) + ' <span class="mute">' + esc(a.code) + ' · ' + esc(a.type) + '</span>'; }
+function inWatch(X, k){ var t = k.split('|')[0], c = k.slice(t.length + 1), mk = t.indexOf('미국') === 0 ? '미국' : '한국'; return X[wlOf(t)].some(function(p){ return p.market === mk && p.code === c; }); }
+function wOf(X, k){ var r = comp(X).filter(function(x){ return kOf(x) === k; })[0]; return r ? cents(r.weight) : 0; }
+function pctIn(v){ var c = cents(v); return isFinite(Number(v)) && c > 0 && c <= 10000 && Math.abs(Number(v) * 100 - c) < 1e-6 ? c : null; }
+
+function nlSubmit(text){
+  text = String(text || '').trim(); if (!text || !S) return;
+  if (AIBUSY) { nlSay('sys', '앞 명령을 해석하는 중입니다 — 끝난 뒤 다시 보내세요.', 'mute'); return; }
+  nlSay('me', esc(text));
+  if (DR && DR.q) { nlAnswer(text); return; }
+  var yn = ynOf(text);
+  if (DR && DR.pv && yn) { if (yn < 0) nlCancel(); else nlSay('sys', '저장은 미리보기의 <b>승인</b> 버튼으로만 합니다 — 입력한 답으로는 저장하지 않았습니다.', 'q'); return; }
+  if (DR && DR.pv) nlSay('sys', '이전 미리보기는 취소했습니다(저장 안 됨).', 'mute');
+  DR = null;
+  var prev = AIQ; AIQ = null;
+  if (prev && yn < 0) { nlSay('sys', '취소했습니다 — 아무것도 저장하지 않았습니다.', 'mute'); return; }
+  if (!prev && yn) { nlSay('sys', '확인을 기다리는 질문이 없습니다 — 할 일을 다시 입력해주세요.', 'mute'); return; }   // 혼자 온 '예'를 새 명령으로 해석하지 않는다
+  var wait = aiOn() && !NLHELP.test(text) ? {who: 'sys', html: '해석 중…', cls: 'mute'} : null;
+  if (wait) { AIBUSY = true; NLM.push(wait); nlDraw(); }
+  var done = function(){ if (!wait) return; AIBUSY = false; var i = NLM.indexOf(wait); if (i >= 0) NLM.splice(i, 1); };
+  nlParse(text, prev).then(function(res){
+    done();
+    if (res && res.ask) {
+      var n = prev ? prev.n + 1 : 1;
+      if (n > 2) { nlFail('두 번 물어도 해석하지 못했습니다 — 종목·할 일·숫자를 한 문장에 적어주세요.'); return; }
+      AIQ = {id: ++DSEQ, ut: res.ut, q: res.ask, n: n};
+      var yq = /(까요|나요|습니까|니까|는지요|가요|죠)\s*[?？]*\s*$/.test(res.ask) && !/(몇|어느|무엇|무슨|뭘|뭐|얼마|어떤|어떻게|어디|누구|언제|아니면|또는|혹은)/.test(res.ask);   // 예/아니요로 답할 질문이면 버튼
+      nlSay('sys', esc(res.ask) + ' <span class="mute small">(답하면 앞 문장과 합쳐 다시 해석)</span><div class="nb">' + (yq ? '<button type="button" class="pri" data-naqy="' + AIQ.id + '">예</button><button type="button" data-naq="' + AIQ.id + '">아니요</button>'
+        : '<button type="button" data-naq="' + AIQ.id + '">취소</button>') + '</div>', 'q'); return;
+    }
+    if (!res || res.fail) { nlFail((res && res.fail) || '해석하지 못했습니다.', res && res.unknown, res && res.aiErr, res && res.why); return; }
+    DR = {id: ++DSEQ, text: res.ut, cmds: res.cmds, notes: res.note ? [res.note] : [], via: res.via, model: res.model};
+    nlNext();
+  }, function(x){ done(); nlFail('해석 중 오류: ' + x.message); });
+}
+function nlAsk(q){ DR.q = q; DR.qn = (DR.qn || 0) + 1; nlSay('sys', esc(q.text) + (q.yn ? '<div class="nb"><button type="button" class="pri" data-nq="0" data-dr="' + DR.id + '" data-dq="' + DR.qn + '">예</button><button type="button" data-ncancel="' + DR.id + '">아니요</button></div>' : q.choices ? '<div class="nb">' + q.choices.map(function(c, i){ return '<button type="button" data-nq="' + i + '" data-dr="' + DR.id + '" data-dq="' + DR.qn + '">' + (i + 1) + '. ' + esc(c.label) + '</button>'; }).join('') + '<button type="button" data-ncancel="' + DR.id + '">취소</button></div>' : '<div class="nb"><button type="button" data-ncancel="' + DR.id + '">취소</button></div>'), 'q'); }
+function nlAnswer(text){
+  var q = DR.q, yn = ynOf(text);
+  if (yn < 0) { nlCancel(); return; }
+  if (q.choices) {
+    var n = parseInt(text, 10), i = q.yn ? (yn > 0 || /^1\.?$/.test(text) ? 0 : -1) : n >= 1 && n <= q.choices.length ? n - 1 : -1;   // 예/아니요 질문은 '예'류·1만
+    if (i < 0 && !q.yn && yn > 0 && q.choices.length === 1) i = 0;   // 선택지 하나인 확인 질문에 '예·ㅇㅇ·맞아'
+    if (i < 0 && !q.yn) q.choices.forEach(function(c, j){ if (i < 0 && (c.label.indexOf(text) >= 0 || (c.keys || []).some(function(k){ return text.indexOf(k) >= 0; }))) i = j; });
+    if (i < 0) { nlSay('sys', q.yn ? '"예" 또는 "아니요"로 답하거나 버튼을 눌러주세요.' : '선택지 번호(1~' + q.choices.length + ')나 버튼으로 골라주세요. 그만하려면 "취소".', 'q'); return; }
+    DR.q = null; q.choices[i].go(); nlNext(); return;
+  }
+  if (q.input === 'num') {
+    var m = text.replace(/,/g, '').match(/-?\d+(\.\d+)?/), v = m ? pctIn(m[0]) : null;
+    if (v == null) { nlSay('sys', '0보다 크고 100 이하인 숫자(소수 둘째 자리까지)로 적어주세요.', 'q'); return; }
+    DR.q = null; q.set(v); nlNext(); return;
+  }
+  if (q.input === 'text') {
+    if (yn > 0) { nlSay('sys', '사유 문장을 적어주세요 — "' + esc(text) + '"은(는) 사유로 저장하지 않습니다. 그만하려면 "취소".', 'q'); return; }
+    if (text.length > MEMO_MAX) { nlSay('sys', MEMO_MAX + '자 이내로 적어주세요(지금 ' + text.length + '자).', 'q'); return; }
+    DR.q = null; q.set(text); nlNext(); return;
+  }
+}
+function nlCancel(){ if (DR) nlSay('sys', '취소했습니다 — 아무것도 저장하지 않았습니다.', 'mute'); DR = null; nlDraw(); }
+
+// 부족한 정보를 하나씩 묻고, 다 모이면 미리보기
+function nlNext(){
+  var D = DR; if (!D) return;
+  var cs = D.cmds;
+  for (var i = 0; i < cs.length; i++) {
+    var c = cs[i];
+    if (c.done) continue;
+    if (/^Q_|HELP/.test(c.op)) { nlQuery(c); c.done = true; continue; }
+    if (c.op === 'MP_CLEAR') {   // 전체 비우기(D-21): 대상 = 지금 MP 전부(입력·AI가 고르지 않음) → 확인 → 공통 편출사유 → 종목별 편출로 펼쳐 기존 미리보기·승인
+      var H0 = comp(), cz = c, b0 = baseVer(S), inB = function(r){ return !!b0 && b0.rows.some(function(x){ return kOf(x) === kOf(r); }); };
+      if (!H0.length) return nlStop('MP에 종목이 없습니다.');
+      if (cs.some(function(x){ return x !== cz && !/^Q_|HELP|NONE/.test(x.op); })) return nlStop('전체 비우기는 다른 명령과 함께 할 수 없습니다 — 따로 입력하세요.');
+      if (!c.yes) return nlAsk({text: '포트폴리오의 모든 종목을 비우는 것이 맞나요? 지금 ' + H0.length + '종목(투자 ' + pct(sumC(H0)) + '%) → 0종목 · 현금 100%. 승인하기 전에는 저장하지 않습니다.', yn: true, ph: '예 / 아니요',
+        choices: [{label: '예', go: function(){ cz.yes = true; }}]});
+      if (!String(c.memo || '').trim() && H0.some(inB)) return nlAsk({text: '편출사유를 입력해주세요 — ' + H0.filter(inB).length + '종목 모두에 같은 문장으로 사이트 변경 이력에 공개됩니다(' + MEMO_MAX + '자 이내).', input: 'text', ph: '편출사유(모든 종목 공통, 그대로 저장)', set: function(v){ cz.memo = v; }});
+      if (String(c.memo || '').length > MEMO_MAX) return nlStop('사유는 ' + MEMO_MAX + '자 이내(지금 ' + String(c.memo).length + '자).');
+      D.clear = H0.length;
+      D.cmds = cs.slice(0, i).concat(H0.map(function(r){ return {op: 'MP_REMOVE', a: itemFromKey(kOf(r)), memo: String(cz.memo || '').trim()}; }), cs.slice(i + 1));
+      return nlNext();
+    }
+    if (c.a && c.a.cands) { var cc = c; return nlAsk({text: '"' + c.a.q + '"(으)로 찾은 종목이 여럿입니다' + (c.a.more ? '(' + c.a.more + '개 중 앞 6개)' : '') + '. 어느 종목인가요?',
+      choices: c.a.cands.map(function(it){ return {label: it.name + ' ' + it.code + ' · ' + it.type, keys: [it.name, it.code], go: function(){ cc.a = it; }}; }), ph: '번호 또는 종목 선택'}); }
+    var k = c.a.key, nm = c.a.name || nameOf(c.a.type, c.a.code), held = heldIn(S, k), w0 = wOf(S, k), ww = inWatch(S, k);
+    if (c.op === 'ADD_ANY') { var c1 = c; return nlAsk({text: nm + ' — 관심에 추가할까요, MP에 편입할까요?', ph: '1 또는 2',
+      choices: [{label: '관심에 추가', keys: ['관심'], go: function(){ c1.op = 'WATCH_ADD'; }}, {label: 'MP에 편입', keys: ['MP', 'mp', '편입'], go: function(){ c1.op = 'MP_ADD'; }}]}); }
+    if (c.op === 'DEL_ANY') {
+      if (held && !ww) c.op = 'MP_REMOVE'; else if (ww && !held) c.op = 'WATCH_REMOVE';
+      else if (held && ww) { var c2 = c; return nlAsk({text: nm + '은(는) MP와 관심 둘 다에 있습니다. 어디서 뺄까요?', ph: '1 또는 2',
+        choices: [{label: 'MP에서 편출', keys: ['MP', 'mp', '편출'], go: function(){ c2.op = 'MP_REMOVE'; }}, {label: '관심에서 빼기', keys: ['관심'], go: function(){ c2.op = 'WATCH_REMOVE'; }}]}); }
+      else return nlStop(nm + '은(는) MP에도 관심에도 없습니다.');
+    }
+    if (c.op === 'MP_ANY') c.op = held ? 'MP_SET' : 'MP_ADD';
+    if (c.op === 'MP_ADD' && held && !c.asked) { var c3 = c;
+      if (c.w == null) return nlStop(nm + '은(는) 이미 MP에 ' + pct(w0) + '% 있습니다 — 비중을 바꾸려면 "' + nm + ' 7%로"처럼 목표 비중을 적어주세요.');
+      return nlAsk({text: nm + '은(는) 이미 MP에 ' + pct(w0) + '% 있습니다. 어떻게 할까요?', ph: '1 또는 2',
+        choices: [{label: '목표 ' + num(c.w, 2) + '%로 변경', go: function(){ c3.op = 'MP_SET'; }}, {label: '+' + num(c.w, 2) + '%p 추가 → ' + pct(w0 + cents(c.w)) + '%', go: function(){ c3.op = 'MP_SET'; c3.w = (w0 + cents(c3.w)) / 100; }}]}); }
+    if (c.op === 'MP_ADD' && c.w == null) { var c4 = c; return nlAsk({text: nm + ' — MP에 몇 % 비중으로 편입할까요? (현금 ' + pct(10000 - sumC(comp())) + '%)', input: 'num', ph: '편입 비중 % (예: 2)', set: function(v){ c4.w = v / 100; }}); }
+    if (c.op === 'MP_ADD' && pctIn(c.w) == null) return nlStop('비중 ' + c.w + '% — 0보다 크고 100 이하, 소수 둘째 자리까지.');
+    if ((c.op === 'MP_SET' || c.op === 'MP_DELTA') && !held) {
+      if (c.op === 'MP_SET' && pctIn(c.w) != null) { var c5 = c; return nlAsk({text: nm + '은(는) MP에 없습니다. ' + num(c.w, 2) + '%로 편입할까요?', ph: '1 또는 취소',
+        choices: [{label: num(c.w, 2) + '%로 편입', keys: ['편입', '네', '예', '응'], go: function(){ c5.op = 'MP_ADD'; }}]}); }
+      return nlStop(nm + '은(는) MP에 없습니다 — 편입하려면 "' + nm + ' 2% 편입"처럼 적어주세요.');
+    }
+    if (c.op === 'MP_DELTA' && c.soft) { var c6 = c; return nlAsk({text: nm + ' 현재 ' + pct(w0) + '%입니다. 목표 비중을 몇 %로 할까요?' + (c.dir < 0 ? ' 줄어든 비중은 현금으로 갑니다.' : ''), input: 'num', ph: '목표 비중 % (예: 3)', set: function(v){ c6.op = 'MP_SET'; c6.w = v / 100; c6.soft = false; }}); }
+    if (c.op === 'MP_DELTA') { var tc = w0 + cents(c.dw); if (tc <= 0) return nlStop(nm + ' ' + pct(w0) + '% ' + (c.dw < 0 ? '−' : '+') + num(Math.abs(c.dw), 2) + '%p = 0% 이하 — 빼려면 "' + nm + ' 편출".'); c.op = 'MP_SET'; c.w = tc / 100; c.from = w0; }
+    if (c.op === 'MP_SET' && pctIn(c.w) == null) return nlStop('목표 비중 ' + c.w + '% — 0보다 크고 100 이하, 소수 둘째 자리까지.');
+    if (c.op === 'MP_REMOVE' && !held) return nlStop(nm + '은(는) 지금 MP에 없습니다.');
+    if (c.op === 'WATCH_ADD' && ww && !c.memo) { D.notes.push(nm + '은(는) 이미 관심에 있습니다.'); c.done = true; c.op = 'NONE'; continue; }
+    if (c.op === 'WATCH_REMOVE' && !ww) { D.notes.push(nm + '은(는) 관심에 없습니다.'); c.done = true; c.op = 'NONE'; continue; }
+    if ((c.op === 'MARK' || c.stop || c.px)) {
+      var ccy = ccyOf(c.a.type), bad = [c.stop, c.px].filter(function(n){ return n && n.v > 0 && n.u && n.u !== ccy && n.u !== 'PCT'; })[0];
+      if (bad) return nlStop((ccy === 'USD' ? '미국 종목 가격은 달러로 적어주세요(예: $150, 150달러).' : '한국 종목 가격은 원으로 적어주세요(예: 80만원).'));
+      if (!PV) return nlStop(PV_ERR || '관리자 전용 문서를 쓸 수 없어 손절가·지정가를 저장할 수 없습니다.');
+      var willHeld = held && !cs.some(function(x){ return x.op === 'MP_REMOVE' && x.a.key === k; }) || cs.some(function(x){ return x.op === 'MP_ADD' && x.a.key === k; });
+      var willW = (ww && !cs.some(function(x){ return x.op === 'WATCH_REMOVE' && x.a.key === k; })) || cs.some(function(x){ return x.op === 'WATCH_ADD' && x.a.key === k; });
+      if (!willHeld && !willW) { var c7 = c; return nlAsk({text: nm + '은(는) MP에도 관심에도 없습니다. 관심에 추가하고 ' + (c.stop ? '손절가' : '지정가') + '를 설정할까요?', ph: '1 또는 취소',
+        choices: [{label: '관심에 추가하고 설정', keys: ['관심', '네', '예', '응'], go: function(){ D.cmds.unshift({op: 'WATCH_ADD', a: c7.a}); }}]}); }
+    }
+    if (c.op === 'MEMO' && !held && !ww && !cs.some(function(x){ return (x.op === 'MP_ADD' || x.op === 'WATCH_ADD') && x.a.key === k; })) return nlStop(nm + '은(는) MP에도 관심에도 없어 사유를 적을 곳이 없습니다.');
+    if (c.op === 'MP_ADD' && !String(c.memo || '').trim()) { var c8 = c; return nlAsk({text: nm + ' 편입 사유를 입력해주세요 — 입력한 문장 그대로 사이트에 공개됩니다(' + MEMO_MAX + '자 이내).', input: 'text', ph: '편입 사유(그대로 저장)', set: function(v){ c8.memo = v; }}); }
+    if (c.op === 'MP_REMOVE' && !String(c.memo || '').trim() && baseVer(S) && baseVer(S).rows.some(function(r){ return kOf(r) === k; })) { var c9 = c; return nlAsk({text: nm + ' 편출사유를 입력해주세요 — 사이트 변경 이력에 공개됩니다(' + MEMO_MAX + '자 이내).', input: 'text', ph: '편출사유(그대로 저장)', set: function(v){ c9.memo = v; }}); }
+    if (c.memo && String(c.memo).length > MEMO_MAX && c.how !== 'append') return nlStop('사유는 ' + MEMO_MAX + '자 이내(지금 ' + String(c.memo).length + '자).');
+    c.checked = true;
+  }
+  var act = cs.filter(function(c){ return !/^Q_|HELP|NONE/.test(c.op); });
+  if (!act.length) { if (D.notes.length) nlSay('sys', esc(D.notes.join(' ')), 'mute'); DR = null; nlDraw(); return; }
+  // 배분 방식: 현금이 충분하면 현금에서(기존 종목 그대로). 모자라면 관리자가 고른다.
+  var adds = act.filter(function(c){ return c.op === 'MP_ADD'; }), sets = act.filter(function(c){ return c.op === 'MP_SET'; });
+  var modeSet = adds.filter(function(c){ return c.mode; })[0];
+  if (adds.length && !D.addMode) {
+    if (modeSet) D.addMode = modeSet.mode;
+    else {
+      var pre = nlPlan(D, 'none'), C = pre.err ? null : 10000 - sumC(comp(pre.W)), need = adds.reduce(function(s, c){ return s + cents(c.w); }, 0);
+      if (C != null && need <= C) D.addMode = 'cash';
+      else {
+        var pp = nlPlan(D, 'prop'), pe = nlPlan(D, 'eq'), m0 = comp(pre.err ? S : pre.W).length;
+        var eqW = pe.err ? '–' : pct(wOf(pe.W, adds[0].a.key));
+        return nlAsk({text: '현금이 부족합니다 — 필요 ' + pct(need) + '% · 가용 현금 ' + (C == null ? '–' : pct(C)) + '%. 어떻게 할까요?', ph: '1 또는 2',
+          choices: [{label: '기존 종목 비례 축소 — 신규 ' + adds.map(function(c){ return num(c.w, 2) + '%'; }).join('·') + ', 기존 ' + m0 + '종목을 비중대로 줄임' + (pp.err ? ' (불가: ' + pp.err + ')' : ''), keys: ['비례'], go: function(){ D.addMode = 'prop'; }},
+                    {label: '동일 비중 — 신규 포함 ' + (m0 + adds.length) + '종목 모두 ' + eqW + '% (요청한 비중과 다름)', keys: ['동일', '균등'], go: function(){ D.addMode = 'eq'; }}]});
+      }
+    }
+  }
+  if (sets.length === 1 && !D.setMode) {
+    var s1 = sets[0], ps = nlPlan(D, D.addMode || 'none', 'cash');
+    if (s1.mode) D.setMode = s1.mode === 'prop' ? 'prop' : 'cash';
+    else if (!ps.err) D.setMode = 'cash';
+    else if (/현금/.test(ps.err)) { var pr = nlPlan(D, D.addMode || 'none', 'prop');
+      return nlAsk({text: nameOf(s1.a.type, s1.a.code) + ' ' + pct(wOf(S, s1.a.key)) + '% → ' + num(s1.w, 2) + '% — 현금(' + pct(10000 - sumC(comp())) + '%)이 부족합니다. 다른 종목을 비례로 줄여 맞출까요?', ph: '1 또는 취소',
+        choices: [{label: '다른 종목 비례 축소' + (pr.err ? ' (불가: ' + pr.err + ')' : ''), keys: ['비례', '네', '예'], go: function(){ D.setMode = 'prop'; }}]}); }
+    else D.setMode = 'cash';
+  }
+  var R = nlPlan(D, D.addMode || 'none', D.setMode || 'cash');
+  if (R.err) return nlStop(R.err);
+  D.pv = R; D.ut = UT; D.put = PUT;
+  nlSay('sys', nlPreview(D, R), 'pv');
+}
+function nlStop(msg){ nlSay('sys', esc(msg) + ' — 아무것도 바꾸지 않았습니다.', 'bad'); DR = null; nlDraw(); }
+
+// 새 상태 계산(저장 안 함) — 기존 제안 함수를 그대로 부른다. 전역 S·MS를 잠깐 바꿨다가 반드시 되돌린다.
+function nlPlan(D, addMode, setMode){
+  var W = clone(S), P = PV ? clone(PV) : null, keepS = S, keepMS = MS, t = today(), err = null, info = {};
+  var act = D.cmds.filter(function(c){ return !/^Q_|HELP|NONE/.test(c.op) && !c.done; });
+  try {
+    act.forEach(function(c){   // 1) 관심
+      if (c.op !== 'WATCH_ADD' && c.op !== 'WATCH_REMOVE') return;
+      var L = wlOf(c.a.type), mk = ccyOf(c.a.type) === 'USD' ? '미국' : '한국', i = -1;
+      W[L].forEach(function(p, j){ if (p.market === mk && p.code === c.a.code) i = j; });
+      if (c.op === 'WATCH_ADD' && i < 0) { var o = {market: mk, code: c.a.code}; if (c.memo) o.memo = c.memo; W[L].push(o); }
+      else if (c.op === 'WATCH_ADD' && c.memo) { var m3 = c.how === 'append' && W[L][i].memo ? W[L][i].memo + ' ' + c.memo : c.memo; if (m3.length > MEMO_MAX) throw new Error('관심 메모가 ' + MEMO_MAX + '자를 넘습니다.'); W[L][i].memo = m3; }
+      if (c.op === 'WATCH_REMOVE' && i >= 0) {
+        W[L].splice(i, 1);
+        if (P && markOf(c.a.key, S, PV) && !heldIn(S, c.a.key)) (P.marks[c.a.key] = P.marks[c.a.key] || []).push({set: t, since: null, off: 1});
+      }
+    });
+    var ex = act.filter(function(c){ return c.op === 'MP_REMOVE'; });   // 2) 편출(빠진 비중 = 현금, '비례'라고 했으면 남은 종목에)
+    if (ex.length) {
+      S = W; MS = {sel: ex.map(function(c){ return c.a.key; }), mode: ex.some(function(c){ return c.mode === 'prop'; }) ? 'prop' : 'cash', memo: {}};
+      var PX = exitProposal(); if (PX.err) throw new Error(PX.err);
+      var em = {}; ex.forEach(function(c){ em[c.a.key] = String(c.memo || '').trim(); });
+      W = withToday(W, PX.nc, em); S = keepS;
+    }
+    var sets = act.filter(function(c){ return c.op === 'MP_SET'; });   // 3) 비중 변경 — 하나는 한 종목 조절, 여럿은 전체 조절(나머지 그대로)
+    if (sets.length === 1) {
+      S = W; MS = {key: sets[0].a.key, val: String(sets[0].w), mode: setMode === 'prop' ? 'prop' : 'cash'};
+      var P1 = w1Proposal(); if (P1.err) throw new Error(nameOf(sets[0].a.type, sets[0].a.code) + ': ' + P1.err);
+      W = withToday(W, P1.nc, null); S = keepS;
+    } else if (sets.length > 1) {
+      S = W; MS = {ws: {}}; sets.forEach(function(c){ MS.ws[c.a.key] = String(c.w); });
+      var PA = wallProposal(); if (PA.err) throw new Error(PA.err);
+      W = withToday(W, PA.nc, null); S = keepS;
+    }
+    var adds = act.filter(function(c){ return c.op === 'MP_ADD'; });   // 4) 편입 — 한 번에(같은 배분 방식)
+    if (adds.length && addMode !== 'none') {
+      S = W; MS = {sel: adds.map(function(c){ return {key: c.a.key, type: c.a.type, code: c.a.code, name: c.a.name || '', r: c.a.r || null}; }), mode: addMode, amt: null, ws: {}, memo: {}};
+      adds.forEach(function(c){ if (addMode !== 'eq') MS.ws[c.a.key] = String(c.w); MS.memo[c.a.key] = String(c.memo || '').trim(); });
+      var PD = addProposal(); if (PD.err) throw new Error(PD.err);
+      info.addMode = addMode; W = withToday(W, PD.nc, null); S = keepS;
+    }
+    act.forEach(function(c){   // 5) 사유 · 관심 메모(입력 문장 그대로)
+      if (c.op !== 'MEMO') return;
+      var k = c.a.key;
+      if (heldIn(W, k)) {
+        S = W; var sn = sinceOf(W, k), ds = runDates(k, sn); S = keepS;
+        var cur = (comp(W).filter(function(r){ return kOf(r) === k; })[0] || {}).memo || '', m = c.how === 'append' && cur ? cur + ' ' + c.memo : c.memo;
+        if (m.length > MEMO_MAX) throw new Error('추천사유가 ' + MEMO_MAX + '자를 넘습니다(' + m.length + '자).');
+        W.rows.forEach(function(r){ if (kOf(r) === k && ds.indexOf(r.date) >= 0) r.memo = m; });
+      } else {
+        var L = wlOf(c.a.type), mk = ccyOf(c.a.type) === 'USD' ? '미국' : '한국', it = W[L].filter(function(p){ return p.market === mk && p.code === c.a.code; })[0];
+        if (!it) throw new Error(nameOf(c.a.type, c.a.code) + ': 사유를 적을 곳(MP·관심)이 없습니다.');
+        var m2 = c.how === 'append' && it.memo ? it.memo + ' ' + c.memo : c.memo;
+        if (m2.length > MEMO_MAX) throw new Error('관심 메모가 ' + MEMO_MAX + '자를 넘습니다(' + m2.length + '자).');
+        it.memo = m2;
+      }
+    });
+    act.forEach(function(c){   // 6) 손절가·지정가(관리자 전용 문서)
+      if (!(c.op === 'MARK' || c.stop || c.px)) return;
+      if (!P) throw new Error(PV_ERR || '관리자 전용 문서를 쓸 수 없습니다.');
+      var k = c.a.key, h = heldIn(W, k), cur = markOf(k, W, P), rec = {set: t, since: h ? sinceOf(W, k) : null};
+      if (!h && !inWatch(W, k)) throw new Error(nameOf(c.a.type, c.a.code) + ': MP나 관심에 있어야 손절가·지정가를 둘 수 있습니다.');
+      if (cur) { if (cur.stop) rec.stop = cur.stop; if (cur.px) rec.px = cur.px; }
+      if (c.stop) { if (c.stop.v > 0) rec.stop = c.stop.v; else delete rec.stop; }
+      if (c.px) { if (c.px.v > 0) rec.px = c.px.v; else delete rec.px; }
+      if (!rec.stop && !rec.px) rec.off = 1;
+      (P.marks[k] = P.marks[k] || []).push(rec);
+      if (P.marks[k].length > 20) P.marks[k] = P.marks[k].slice(-20);
+    });
+  } catch (e) { err = e.message; } finally { S = keepS; MS = keepMS; }
+  if (!err) err = lockErr(S, W) || stateErr(W);
+  return {W: W, P: P, err: err, info: info};
+}
+
+// 미리보기 = 지금(S·PV) ↔ 새 상태(W·P) 비교 — 명령 문장이 아니라 실제로 바뀌는 값을 보여준다
+function nlChanges(D, R){
+  var L = [], c0 = comp(S), c1 = comp(R.W), m0 = {}, m1 = {}, t = today();
+  c0.forEach(function(r){ m0[kOf(r)] = r; }); c1.forEach(function(r){ m1[kOf(r)] = r; });
+  var keys = Object.keys(m0).concat(Object.keys(m1).filter(function(k){ return !m0[k]; })), minor = [];
+  var addMode = {cash: '현금에서', prop: '기존 종목 비례 축소', eq: '동일 비중'}[R.info.addMode] || '';
+  var named = {}; D.cmds.forEach(function(c){ if (c.a && c.a.key) named[c.a.key] = 1; });
+  keys.forEach(function(k){
+    var a = m0[k] ? cents(m0[k].weight) : 0, b = m1[k] ? cents(m1[k].weight) : 0, tp = k.split('|')[0], cd = k.slice(tp.length + 1), nm = nameOf(tp, cd);
+    var nmh = '<b>' + esc(nm) + '</b> <span class="mute">' + esc(cd) + ' · ' + esc(tp) + '</span>';
+    if (!m0[k]) L.push({h: 'MP 편입 — ' + nmh + '<br>비중 없음 → <b>' + pct(b) + '%</b>' + (addMode ? ' · ' + addMode : '') + ' · 추천일 ' + t + ' · 추천가 = 추천일 정규장 종가(자동)'
+      + '<br>추천사유: “' + esc(m1[k].memo || '') + '” <span class="mute">(입력 그대로, 공개)</span>', t: 'MP 편입 ' + nm + ' ' + pct(b) + '%' + (addMode ? ' ' + addMode : '')});
+    else if (!m1[k]) { var ex = R.W.exits.filter(function(e){ return e.date === t && e.type + '|' + e.code === k; })[0];
+      L.push({h: 'MP 편출 — ' + nmh + '<br>' + pct(a) + '% → <b>없음</b> · 빠진 비중은 ' + (D.cmds.some(function(c){ return c.op === 'MP_REMOVE' && c.mode === 'prop'; }) ? '남은 종목에 비례' : '현금으로')
+        + (ex && ex.memo ? '<br>편출사유: “' + esc(ex.memo) + '” <span class="mute">(입력 그대로, 공개)</span>' : ex ? '' : '<br><span class="mute">오늘 편입한 종목 — 편출 기록 없이 빠짐</span>'), t: 'MP 편출 ' + nm + ' ' + pct(a) + '%' + (ex && ex.memo ? ' 사유 ' + ex.memo : '')}); }
+    else if (a !== b) { var ln = {h: (named[k] ? 'MP 비중 — ' : '') + nmh + ' ' + pct(a) + '% → <b>' + pct(b) + '%</b> (' + (b > a ? '+' : '−') + pct(Math.abs(b - a)) + '%p)', t: '비중 ' + nm + ' ' + pct(a) + '→' + pct(b)}; if (named[k]) L.push(ln); else minor.push(ln); }
+    if (m0[k] && m1[k] && (m0[k].memo || '') !== (m1[k].memo || '')) L.push({h: '추천사유 — ' + nmh + '<br><span class="mute">전:</span> “' + esc(m0[k].memo || '') + '”<br><span class="mute">후:</span> “' + esc(m1[k].memo || '') + '” <span class="mute">(공개)</span>', t: '추천사유 ' + nm + ' → ' + (m1[k].memo || '')});
+  });
+  ['watch', 'picks'].forEach(function(Lk){
+    var o = {}, n = {}; S[Lk].forEach(function(p){ o[p.market + '|' + p.code] = p; }); R.W[Lk].forEach(function(p){ n[p.market + '|' + p.code] = p; });
+    Object.keys(n).forEach(function(k){ var p = n[k], tp = wType(Lk, p), nm = nameOf(tp, p.code);
+      if (!o[k]) L.push({h: '관심 추가 — <b>' + esc(nm) + '</b> <span class="mute">' + esc(p.code) + ' · ' + tp + '</span> → 사이트 ' + (Lk === 'watch' ? '주식' : 'ETF') + ' › 관심' + (p.memo ? '<br>관심 메모: “' + esc(p.memo) + '” <span class="mute">(공개)</span>' : ''), t: '관심 추가 ' + nm + (p.memo ? ' 메모 ' + p.memo : '')});
+      else if ((o[k].memo || '') !== (p.memo || '')) L.push({h: '관심 메모 — <b>' + esc(nm) + '</b><br><span class="mute">전:</span> “' + esc(o[k].memo || '') + '”<br><span class="mute">후:</span> “' + esc(p.memo || '') + '” <span class="mute">(공개)</span>', t: '관심 메모 ' + nm + ' → ' + (p.memo || '')}); });
+    Object.keys(o).forEach(function(k){ if (!n[k]) { var p = o[k], nm = nameOf(wType(Lk, p), p.code); L.push({h: '관심 빼기 — <b>' + esc(nm) + '</b> <span class="mute">' + esc(p.code) + '</span>' + (p.memo ? '<br><span class="mute">관심 메모 “' + esc(p.memo) + '”도 함께 지워짐</span>' : ''), t: '관심 빼기 ' + nm}); } });
+  });
+  if (R.P) Object.keys(R.P.marks).forEach(function(k){
+    var tp = k.split('|')[0], cd = k.slice(tp.length + 1), b0 = markOf(k, S, PV), b1 = markOf(k, R.W, R.P), ccy = ccyOf(tp);
+    var s0 = markTxt(b0, ccy), s1 = markTxt(b1, ccy);
+    if (s0 !== s1) L.push({h: '손절가·지정가 — <b>' + esc(nameOf(tp, cd)) + '</b> <span class="mute">(관리자만)</span><br>' + esc(s0 || '없음') + ' → <b>' + esc(s1 || '없음') + '</b>', t: '가격 ' + nameOf(tp, cd) + ' ' + (s0 || '없음') + ' → ' + (s1 || '없음')});
+  });
+  Object.keys(m1).forEach(function(k){ if (!m0[k] && PV && markOf(k, S, PV) && !(R.P && markOf(k, R.W, R.P))) L.push({h: '<span class="mute">' + esc(nameOf(k.split('|')[0], k.split('|').slice(1).join('|'))) + ': 관심일 때 설정한 ' + esc(markTxt(markOf(k, S, PV), ccyOf(k.split('|')[0]))) + '은(는) 기록으로만 남고 MP에는 쓰지 않습니다 — 필요하면 같이 입력하세요.</span>', t: ''}); });
+  return {L: L, minor: minor, cash0: 10000 - sumC(c0), cash1: 10000 - sumC(c1), mp: sigOf(c0) !== sigOf(c1)};
+}
+function nlPreview(D, R){
+  var X = nlChanges(D, R);
+  if (!X.L.length && !X.minor.length) { DR = null; return '바뀌는 것이 없습니다' + (D.notes.length ? ' — ' + esc(D.notes.join(' ')) : '') + '.'; }
+  D.head = X.L.map(function(l){ return l.t; }).filter(Boolean); D.lines = D.head.concat(X.minor.map(function(l){ return l.t; }));
+  return '<div class="pv"><b>변경 예정</b> <span class="mute small">' + X.L.filter(function(l){ return l.t; }).length + '건 · 승인하면 한 번에 저장(하나라도 안 되면 전부 취소) · 해석 ' + (D.via === 'ai' ? 'AI' : '규칙') + '</span>'
+    + (D.clear ? '<div><b>MP 전체 비우기</b> — ' + D.clear + '종목 → <b>0종목</b> · 현금 ' + pct(X.cash0) + '% → <b>' + pct(X.cash1) + '%</b> <span class="mute small">(대상 = 지금 MP 전부)</span></div>' : '')
+    + '<ol>' + X.L.map(function(l){ return l.t ? '<li>' + l.h + '</li>' : ''; }).join('') + '</ol>'
+    + X.L.filter(function(l){ return !l.t; }).map(function(l){ return '<div class="small">' + l.h + '</div>'; }).join('')
+    + (X.minor.length ? '<details class="small"><summary>다른 종목 비중 변화 ' + X.minor.length + '개</summary><ul class="dl">' + X.minor.map(function(l){ return '<li>' + l.h + '</li>'; }).join('') + '</ul></details>' : '')
+    + (X.mp ? '<div class="small">현금 ' + pct(X.cash0) + '% → <b>' + pct(X.cash1) + '%</b> · 종목 ' + pct(10000 - X.cash0) + '% → ' + pct(10000 - X.cash1) + '%</div>' : '')
+    + (D.notes.length ? '<div class="small mute">' + esc(D.notes.join(' ')) + '</div>' : '')
+    + '<div class="small mute">이대로 적용할까요? 저장하면 공개 항목은 사이트에 바로 반영됩니다.</div>'
+    + '<div class="nb"><button type="button" class="pri" data-nok="' + D.id + '">승인</button><button type="button" data-nedit="' + D.id + '">수정</button><button type="button" data-ncancel="' + D.id + '">취소</button></div></div>';
+}
+function nlApprove(id, btn){
+  var D = DR; if (!D || D.id !== id || !D.pv) { nlSay('sys', '이미 끝난 미리보기입니다.', 'mute'); return; }
+  if (D.ut !== UT || D.put !== PUT) { nlSay('sys', '그 사이 저장된 내용이 있어 미리보기를 다시 만듭니다.', 'q'); D.pv = null; D.addMode = D.addMode; nlNext(); return; }
+  if (btn) btn.disabled = true;
+  var R = D.pv, P = R.P ? clone(R.P) : (PV ? clone(PV) : null);
+  if (P) P.log.push({t: new Date().toISOString(), src: D.via === 'ai' ? 'ai:' + (D.model || 'gemini') : 'rules', uid: (SES && SES.uid) || '', in: D.text.slice(0, 500),
+    ops: D.cmds.filter(function(c){ return !/^Q_|HELP|NONE/.test(c.op); }).map(function(c){ var o = {op: c.op, k: c.a && c.a.key}; if (c.w != null) o.w = c.w; if (c.from != null) o.from = c.from / 100; if (c.stop) o.stop = c.stop.v; if (c.px) o.px = c.px.v; if (D.addMode && c.op === 'MP_ADD') o.mode = D.addMode; return o; }),
+    chg: (D.lines || []).slice(0, 40)});
+  saveAll(R.W, P, '명령 저장됨 — 사이트에 바로 반영').then(function(){
+    nlSay('sys', '<b>저장했습니다.</b> ' + esc((D.head || []).join(' · ')) + (D.lines && D.head && D.lines.length > D.head.length ? ' <span class="mute">(다른 종목 비중 ' + (D.lines.length - D.head.length) + '개 같이 조정)</span>' : '') + (P ? '' : ' <span class="warn">(관리자 전용 문서를 못 써서 명령 기록은 남기지 못함)</span>'), 'ok'); DR = null; nlDraw();
+  }, function(x){ if (btn) btn.disabled = false; nlSay('sys', '<b>저장 안 됨</b> — ' + esc(x.message), 'bad'); if (/다른 창|새로고침/.test(x.message)) { DR = null; nlDraw(); } });
+}
+
+// 조회(바꾸지 않음) — 데이터만, 의견 없음
+function nlQuery(c){
+  if (c.op === 'HELP') { nlSay('sys', '<b>이렇게 말하면 됩니다</b> (' + (aiOn() ? 'AI 해석 — 자연스러운 문장도 됨' : '규칙 해석') + ' · 승인해야 저장)<br>' + EXAMPLES.map(function(x){ return '<button type="button" class="lnk" data-nlx="' + esc(x) + '">' + esc(x) + '</button>'; }).join('<br>')
+    + '<br><span class="mute">줄임말: 하닉·삼전·엔비·테슬·팔란. 그 밖은 종목명·코드. 사유는 "사유는 …" 뒤 문장을 그대로 저장. 가격은 "손절가 …" / "지정가 …"(관리자만).</span>'); return; }
+  if (c.op === 'Q_MP') {
+    var H = comp().slice().sort(function(a, b){ return b.weight - a.weight; }), I = sumC(comp());
+    nlSay('sys', '<b>현재 MP</b> ' + H.length + '종목 · 투자 ' + pct(I) + '% · 현금 ' + pct(10000 - I) + '%<table class="nt">' + H.map(function(r){ var k = kOf(r);
+      return '<tr><td>' + esc(nameOf(r.type, r.code)) + ' <span class="mute">' + esc(r.code) + '</span>' + markHtml(r.type, r.code) + '</td><td class="r">' + pct(cents(r.weight)) + '%</td><td class="r mute">' + esc(sinceOf(S, k) || '') + '</td></tr>'; }).join('') + '</table>'); return; }
+  if (c.op === 'Q_WATCH') {
+    nlSay('sys', [['watch', '관심 종목'], ['picks', '관심 ETF']].map(function(x){ return '<b>' + x[1] + '</b> ' + S[x[0]].length + '개' + (S[x[0]].length ? '<table class="nt">' + S[x[0]].map(function(p){ var t = wType(x[0], p), ix = idxOf(t, p.code);
+      return '<tr><td>' + esc(nameOf(t, p.code)) + ' <span class="mute">' + esc(p.code) + '</span>' + markHtml(t, p.code) + (p.memo ? '<br><span class="mute">' + esc(p.memo) + '</span>' : '') + '</td><td class="r">' + (ix && g(ix, 'rk') != null ? rsShort(ix) : '<span class="mute">밖</span>') + '</td></tr>'; }).join('') + '</table>' : ''); }).join('<br>')); return; }
+  if (c.op === 'Q_WHY') {
+    var a = c.a; if (a.cands) { nlSay('sys', '"' + esc(a.q) + '" 후보: ' + a.cands.map(function(it){ return esc(it.name) + ' ' + esc(it.code); }).join(', ') + ' — 정확한 이름으로 다시 물어보세요.', 'q'); return; }
+    var k = a.key, tp = a.type, cd = a.code, h = [], vs = vers(S), ix = idxOf(tp, cd);
+    if (heldIn(S, k)) { var r = comp().filter(function(x){ return kOf(x) === k; })[0], sn = sinceOf(S, k);
+      h.push('<b>MP 보유</b> · 추천일 ' + esc(sn) + ' · 지금 비중 ' + pct(cents(r.weight)) + '%'); h.push('추천사유: ' + (r.memo ? '“' + esc(r.memo) + '”' : '<span class="warn">없음</span>'));
+      var hist = [], last = null; vs.forEach(function(v){ var x = v.rows.filter(function(y){ return kOf(y) === k; })[0]; if (x && v.date >= sn) { var w = pct(cents(x.weight)); if (w !== last) hist.push(v.date + ' ' + w + '%'); last = w; } });
+      if (hist.length > 1) h.push('비중 이력: ' + esc(hist.join(' → '))); }
+    else h.push('지금 MP에 없음');
+    S.exits.filter(function(e){ return e.type + '|' + e.code === k; }).forEach(function(e){ h.push('편출 ' + esc(e.date) + (e.memo ? ' — “' + esc(e.memo) + '”' : '')); });
+    if (inWatch(S, k)) { var p = S[wlOf(tp)].filter(function(q){ return q.code === cd; })[0]; h.push('관심에 있음' + (p && p.memo ? ' — 메모 “' + esc(p.memo) + '”' : '')); }
+    var m = PV ? markOf(k) : null; if (m) h.push('관리자만: ' + markHtml(tp, cd).replace(/^ · /, '') + ' <span class="mute">(' + esc(m.set) + ' 설정)</span>');
+    var past = PV && PV.marks[k] ? PV.marks[k].filter(function(x){ return x !== m && !x.off && (x.stop || x.px); }) : [];
+    if (past.length) h.push('<span class="mute">지난 손절가·지정가: ' + esc(past.map(function(x){ return x.set + ' ' + markTxt(x, ccyOf(tp)); }).join(' / ')) + '</span>');
+    if (ix && g(ix, 'rk') != null) h.push('RS 순위 ' + rsShort(ix) + ' · Score ' + num(g(ix, 'sc'), 1) + ' · ' + esc(g(ix, 'lb') || ''));
+    nlSay('sys', '<b>' + nameCode(a) + '</b><br>' + h.join('<br>')); return; }
+  if (c.op === 'Q_RANK') {
+    if (!IDX) { nlSay('sys', '검색 목록이 없어 순위를 볼 수 없습니다.', 'bad'); return; }
+    var mk = c.mks || [], tk = ['KS', 'US', 'KE', 'UE'].filter(function(t){ var kr = t[0] === 'K', etf = t[1] === 'E';
+      return (!mk.some(function(x){ return x === 'KR' || x === 'US'; }) || mk.indexOf(kr ? 'KR' : 'US') >= 0) && (!mk.some(function(x){ return x === 'ETF' || x === 'STOCK'; }) || mk.indexOf(etf ? 'ETF' : 'STOCK') >= 0); });
+    var TOP = {'반도체': /semiconductor|반도체/i, '소프트웨어': /software|소프트웨어/i, '바이오': /biotech|pharma|바이오|제약/i, '제약': /pharma|제약/i, '은행': /bank|은행/i, '금융': /financ|bank|insur|금융|은행|보험/i,
+      '자동차': /automobile|자동차/i, '조선': /ship|조선/i, '방산': /aerospace|defense|방산|항공/i, '에너지': /energy|oil|gas|에너지|정유/i, '2차전지': /batter|electrical equipment|2차전지|전지/i, '배터리': /batter|2차전지|전지/i,
+      '인터넷': /interactive|internet|인터넷/i, '헬스케어': /health|헬스/i, '금': /gold|금현물|골드/i, '채권': /bond|treasury|채권|국채/i, '원자력': /nuclear|uranium|원자력|원전/i, '전력': /electric|utilit|전력|전기/i, '화장품': /personal care|cosmetic|화장품/i};
+    var topic = (c.topic || []).filter(Boolean), res = [], lim = c.n >= 1 && c.n <= 50 ? Math.round(c.n) : 10;
+    var rx = topic.map(function(w){ return TOP[w] || new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'); });
+    tk.forEach(function(t){
+      var rows = IDX.rows.filter(function(r){ if (r[0] !== t || g(r, 'rk') == null) return false; if (!rx.length) return true;
+        var hay = [r[2], g(r, 'cat') || '', secKo(g(r, 'sec') || ''), g(r, 'sec') || '', g(r, 'idx') || ''].join(' '); return rx.every(function(x){ return x.test(hay); }); });
+      rows.sort(function(a, b){ return g(a, 'rk') - g(b, 'rk'); });
+      if (rows.length) res.push('<b>' + T2K[t] + '</b> <span class="mute">' + rows.length + '개 중 RS 순위 상위 ' + Math.min(lim, rows.length) + ' · ' + esc(IDX.asof[MKT[t]] || '') + ' 종가 기준</span><table class="nt">'
+        + rows.slice(0, lim).map(function(r){ return '<tr><td>' + esc(r[2]) + ' <span class="mute">' + esc(r[1]) + '</span></td><td class="r">' + rsShort(r) + '</td><td class="r">Score ' + num(g(r, 'sc'), 1) + '</td><td class="mute">' + esc(g(r, 'lb') || '') + '</td></tr>'; }).join('') + '</table>');
+    });
+    nlSay('sys', (topic.length ? '“' + esc(topic.join(' ')) + '” ' : '') + 'RS 순위 — <b>데이터일 뿐 추천이 아닙니다.</b>' + (c.note ? ' 변경은 하지 않았습니다 — 편입·관심은 종목과 비중을 직접 지시하세요.' : '')
+      + (res.length ? '<br>' + res.join('') : '<br><span class="mute">맞는 종목이 없습니다.</span>')); return; }
+}
+
+// 입력칸 · 버튼
+function nlInit(){
+  var w = $('#nlw'); if (!w || w.dataset.on) return; w.dataset.on = '1'; w.hidden = false;
+  w.innerHTML = '<div class="card nl"><div class="vh"><b>명령으로 관리</b><span class="mute small" id="nlmd"></span><span style="flex:1"></span>'
+    + (AI_URL ? '<button type="button" class="lnk" data-nai></button>' : '') + '<button type="button" class="lnk" data-nlx="도움말">예시</button></div>'
+    + '<p id="nlai" class="small mute" style="margin:4px 0" hidden></p>'
+    + (PV_ERR ? '<p class="warn small" style="margin:4px 0">' + esc(PV_ERR) + '</p>' : '')
+    + '<div id="nll" class="nl-log" aria-live="polite"></div>'
+    + '<form id="nlf" autocomplete="off"><input id="nli" maxlength="600" enterkeyhint="send" aria-label="명령 입력"><button class="pri" type="submit">보내기</button></form></div>';
+  $('#nlf').onsubmit = function(e){ e.preventDefault(); var i = $('#nli'), v = i.value; i.value = ''; nlSubmit(v); };
+  w.addEventListener('click', function(e){
+    var b = e.target.closest('button'); if (!b) return; var d = b.dataset;
+    if (d.nlx != null) { if (AIBUSY) return; if (DR || AIQ) { DR = null; AIQ = null; nlSay('sys', '진행 중이던 명령은 취소했습니다(저장 안 됨).', 'mute'); } nlSubmit(d.nlx); return; }
+    if (d.naqy != null) { if (AIQ && String(AIQ.id) === d.naqy && !AIBUSY) nlSubmit('예'); return; }
+    if (d.naq != null) { if (AIQ && String(AIQ.id) === d.naq) { AIQ = null; nlSay('sys', '취소했습니다 — 아무것도 저장하지 않았습니다.', 'mute'); } return; }
+    if (d.nai != null) { lsSet('rs_nl_ai', aiOn() ? 'off' : null); AIQ = null; nlMode(); nlSay('sys', aiOn() ? 'AI 해석을 켰습니다.' : 'AI 해석을 껐습니다 — 규칙으로만 해석합니다(이 브라우저).', 'mute'); return; }
+    if (d.naiping != null) { b.disabled = true;
+      aiPost({mode: 'ping'}, 20000).then(function(j){ nlSay('sys', 'AI 연결 정상 — 모델 ' + esc(j.model || '?') + (j.key ? '' : ' · <b>중계에 API 키가 없습니다</b>'), j.key ? 'ok' : 'bad'); },
+        function(x){ nlSay('sys', 'AI 연결 실패 — ' + esc(aiErrTxt(x.message)), 'bad'); }).then(function(){ b.disabled = false; }); return; }
+    if (d.nq != null) { if (!DR || !DR.q || String(DR.id) !== d.dr || d.dq !== String(DR.qn)) return; var q = DR.q; DR.q = null; nlSay('me', esc(q.choices[+d.nq].label)); q.choices[+d.nq].go(); nlNext(); return; }
+    if (d.ncancel != null) { if (DR && String(DR.id) === d.ncancel) nlCancel(); return; }
+    if (d.nedit != null) { if (DR && String(DR.id) === d.nedit) { var tx = DR.text; DR = null; nlSay('sys', '수정해서 다시 보내세요 — 이 미리보기는 저장하지 않았습니다.', 'mute'); var i = $('#nli'); i.value = tx; i.focus(); } return; }
+    if (d.nok != null) { nlApprove(+d.nok, b); return; }
+  });
+  nlMode(); nlDraw();
+}
+function nlMode(){   // 해석 방식 표시 · AI 켜기/끄기(이 브라우저에만 기억) · Gemini로 보내는 범위 안내
+  var on = aiOn(), m = $('#nlmd'), t = $('[data-nai]'), p = $('#nlai');
+  if (m) m.textContent = (on ? 'AI 해석(Gemini)' : AI_URL ? '규칙 해석(AI 꺼짐)' : '규칙 해석') + ' · 미리보기에서 승인해야 저장';
+  if (t) t.textContent = on ? 'AI 끄기' : 'AI 켜기';
+  if (p) { p.hidden = !on; p.innerHTML = on ? 'Gemini에는 <b>입력한 명령 문장만</b> 보냅니다(MP 구성·관심·손절가·메모·기록 제외). 무료 등급 — Google이 서비스 개선에 쓸 수 있으니 '
+    + '<b>고객 개인정보·비공개 메모는 입력 금지.</b> 저장은 승인한 미리보기만. <button type="button" class="lnk" data-naiping>연결 확인</button>' : ''; }
+}
+
+// ---------------------------------------------------------------- 시작
+// ================================================================ 사이트(방문자 화면의 Insight · About · Connect · 연결 수단) — rs_tracker/site (D-18, 연결 수단 11종류 D-19)
+// 공개 문서(읽기 누구나 · 쓰기 관리자 UID, 보안 규칙). MP 문서와 따로 두어 MP 저장·크기 한도와 섞이지 않는다. 카드마다 따로 저장한다.
+var SPATH = DPATH.replace(/[^/]+$/, 'site'), SDOC = FSB + '/' + SPATH;
+var SITE = null, SUT = null, SITE_ERR = null, SBUSY = false, SD = {};   // SD = 카드별 고치는 중인 사본(vis · links · about · post)
+var SCATS = ['시장', '투자', '금융', '칼럼'];
+// 연결 수단 종류(D-19) — 공개 페이지 KIND와 같은 키. 새 서비스는 '기타'에 주소(https://…)만 넣으면 된다(코드 수정 없음)
+var LKIND = {tg: 'Telegram 채널', tgme: 'Telegram 개인 연락', kakao: '카카오톡', mail: 'Email', x: 'X', instagram: 'Instagram', youtube: '유튜브',
+  naver: '네이버 블로그', linkedin: 'LinkedIn', newsletter: '뉴스레터', etc: '기타'};
+var LPH = {tg: ['https://t.me/채널이름 또는 @채널이름', 'Telegram 채널'], tgme: ['https://t.me/아이디 또는 @아이디', '@아이디'],   // [주소 예, 이름을 비우면 보일 이름]
+  kakao: ['카카오톡 연결 주소 https://…', '카카오톡'], mail: ['name@example.com', 'Email'], x: ['https://x.com/아이디 또는 @아이디', 'X'],
+  instagram: ['https://instagram.com/아이디 또는 @아이디', 'Instagram'], youtube: ['https://youtube.com/@채널 또는 @채널', '유튜브'],
+  naver: ['https://blog.naver.com/아이디', '네이버 블로그'], linkedin: ['https://www.linkedin.com/in/…', 'LinkedIn'],
+  newsletter: ['구독 페이지 주소 https://…', '뉴스레터'], etc: ['https://…', '사이트 주소']};
+var LCONTACT = {tgme: 1, mail: 1};   // 개인 연락 — 대표 채널(머리글·화면 아래·글 끝)로 쓰지 않는다
+var SMAX = {name: 40, desc: 140, headline: 80, about: 4000, title: 120, body: 20000, url: 300}, MAILX = /^[^\s@<>"'()]+@[^\s@<>"'()]+\.[A-Za-z]{2,}$/;
+var TGX = /^https:\/\/(t\.me|telegram\.me)\/[A-Za-z0-9_+\/-]{3,}$/, URLX = /^https?:\/\/[^\s<>"'`]+\.[^\s<>"'`]+$/;
+function sstr(v){ return String(v == null ? '' : v).replace(/\r\n/g, '\n').trim(); }
+function normSite(s){
+  s = s || {}; var sec = s.sections || {}, ch = s.channels || {}, ab = s.about || {};
+  return {sections: {insight: !!sec.insight, about: !!sec.about, connect: !!sec.connect}, channels: {telegram: !!ch.telegram, email: !!ch.email},
+    links: (s.links || []).filter(function(l){ return l && LKIND[l.kind]; }).map(function(l){ return {kind: l.kind, name: sstr(l.name), value: sstr(l.value), desc: sstr(l.desc), on: l.on !== false}; }),
+    about: {headline: sstr(ab.headline), body: sstr(ab.body)},
+    posts: (s.posts || []).filter(function(p){ return p && p.id; }).map(function(p){ return {id: String(p.id), date: sstr(p.date), cat: SCATS.indexOf(p.cat) >= 0 ? p.cat : SCATS[0], title: sstr(p.title), body: sstr(p.body), on: !!p.on}; })};
+}
+function tgNorm(v){   // '@이름' · 't.me/이름' · 'https://t.me/이름' → https://t.me/이름 (아니면 그대로 — 저장 전 검사에서 걸린다)
+  v = String(v || '').trim(); var m;
+  if ((m = v.match(/^@([A-Za-z0-9_]{4,})$/))) return 'https://t.me/' + m[1];
+  if ((m = v.match(/^(?:https?:\/\/)?(t\.me|telegram\.me)\/([A-Za-z0-9_+\/-]{3,}?)\/?$/i))) return 'https://' + m[1].toLowerCase() + '/' + m[2];
+  return v;
+}
+function linkNorm(k, v){   // 입력 다듬기 — 텔레그램 '@이름', X·Instagram·유튜브 '@아이디', https:// 빠진 주소 → 전체 주소. 나머지는 그대로(저장 전 검사에서 걸린다)
+  v = String(v || '').trim(); var m;
+  if (!v || k === 'mail') return v;
+  if (k === 'tg' || k === 'tgme') return tgNorm(v);
+  if ((m = v.match(/^@([A-Za-z0-9._-]{1,40})$/)) && (k === 'x' || k === 'instagram' || k === 'youtube'))
+    return k === 'x' ? 'https://x.com/' + m[1] : k === 'instagram' ? 'https://www.instagram.com/' + m[1] : 'https://www.youtube.com/@' + m[1];
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(v) && /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+(\/|$)/.test(v)) return 'https://' + v;
+  return v;
+}
+function siteErr(N){
+  for (var i = 0; i < N.links.length; i++) { var l = N.links[i], no = LKIND[l.kind] + (l.name ? '(' + l.name + ')' : '');
+    if (!l.value) { if (l.on) return no + ': 주소를 넣어야 켤 수 있습니다.'; }
+    else if (l.kind === 'mail' ? !MAILX.test(l.value) : l.kind === 'tg' || l.kind === 'tgme' ? !TGX.test(l.value) : !URLX.test(l.value) || l.value.length > SMAX.url)
+      return no + ': 주소 형식이 맞지 않습니다(예: ' + LPH[l.kind][0] + ').';
+    if (l.name.length > SMAX.name || l.desc.length > SMAX.desc) return no + ': 이름은 ' + SMAX.name + '자, 설명은 ' + SMAX.desc + '자까지입니다.'; }
+  if (N.about.headline.length > SMAX.headline || N.about.body.length > SMAX.about) return '운영자 소개가 너무 깁니다(한 줄 ' + SMAX.headline + '자 · 본문 ' + SMAX.about.toLocaleString() + '자까지).';
+  for (var j = 0; j < N.posts.length; j++) { var p = N.posts[j];
+    if (!p.title) return '제목을 적어주세요.';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(p.date)) return '“' + p.title + '”: 날짜는 2026-09-26처럼 적어주세요.';
+    if (p.title.length > SMAX.title || p.body.length > SMAX.body) return '“' + p.title + '”: 제목은 ' + SMAX.title + '자, 본문은 ' + SMAX.body.toLocaleString() + '자까지입니다.'; }
+  return null;
+}
+function loadSite(){
+  return fetch(SDOC + '?key=' + KEY, {cache: 'no-store'}).then(function(r){
+    if (r.status === 404) return {s: {}, ut: null};
+    if (!r.ok) throw new Error(r.status === 403 ? '사이트 설정 문서를 읽을 수 없습니다 — Firestore 보안 규칙(rs_tracker/site)이 게시됐는지 확인하세요.' : '사이트 설정 읽기 실패(' + r.status + ')');
+    return r.json().then(function(d){ return {s: JSON.parse(((d.fields || {}).json || {}).stringValue || '{}'), ut: d.updateTime}; });
+  }).then(function(o){ SITE = normSite(o.s); SUT = o.ut; SITE_ERR = null; }, function(x){ SITE_ERR = x.message; });
+}
+function saveSite(N, part, msg){
+  if (SBUSY) return Promise.reject(new Error('저장 중입니다'));
+  N = normSite(N); var e = siteErr(N); if (e) return Promise.reject(new Error(e));
+  var js = JSON.stringify(N); if (js.length >= 290000) return Promise.reject(new Error('사이트 문서가 너무 큽니다(보안 규칙 30만 자 한도) — 오래된 글을 줄여주세요.'));
+  SBUSY = true;
+  var pre = SUT ? 'currentDocument.updateTime=' + encodeURIComponent(SUT) : 'currentDocument.exists=false';
+  return idToken().then(function(tok){
+    return fetch(SDOC + '?key=' + KEY + '&' + pre, {method: 'PATCH', headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok},
+      body: JSON.stringify({fields: {json: {stringValue: js}, saved_at: {timestampValue: new Date().toISOString()}}})});
+  }).then(function(r){ return r.json().then(function(j){
+    if (r.ok) return j;
+    var st = (j.error && j.error.status) || r.status;
+    if (st === 'FAILED_PRECONDITION' || st === 'ALREADY_EXISTS') throw new Error('다른 창에서 먼저 저장됐습니다. 새로고침한 뒤 다시 하세요.');
+    if (st === 'PERMISSION_DENIED' || r.status === 403) throw new Error('저장이 막혔습니다 — 관리자 계정인지, Firestore 보안 규칙(rs_tracker/site)이 게시됐는지 확인하세요.');
+    if (st === 'UNAUTHENTICATED' || r.status === 401) throw new Error('로그인이 만료됐습니다. 다시 로그인하세요.');
+    throw new Error('저장 실패(' + st + ')');
+  }); }).then(function(j){ SBUSY = false; SUT = j.updateTime; SITE = normSite(JSON.parse(js)); if (part) SD[part] = null; toast(msg || '저장됨 — 사이트에 바로 반영'); render(); },
+    function(x){ SBUSY = false; throw x; });
+}
+function siteVis(X){   // 방문자에게 실제로 보이는지 — 공개 사이트와 같은 규칙(켜짐 + 주소 있음, Telegram·Email은 위 스위치도)
+  var np = X.posts.filter(function(p){ return p.on; }).length;
+  var L = X.links.filter(function(l){ return l.on && l.value && (l.kind === 'tg' || l.kind === 'tgme' ? X.channels.telegram : l.kind === 'mail' ? X.channels.email : true); });
+  return {insight: X.sections.insight && np > 0, np: np, connect: X.sections.connect && L.length > 0, n: L.length,
+    tg: L.some(function(l){ return l.kind === 'tg' || l.kind === 'tgme'; }), em: L.some(function(l){ return l.kind === 'mail'; }),
+    main: L.filter(function(l){ return !LCONTACT[l.kind]; })[0] || null};
+}
+function seedLinks(L){   // 종류마다 빈 칸 하나씩(꺼짐·주소 없음) — 저장할 때 빈 칸은 빠진다
+  Object.keys(LKIND).forEach(function(k){ if (!L.some(function(l){ return l.kind === k; })) L.push({kind: k, name: '', value: '', desc: '', on: false}); });
+  return L;
+}
+function siteHtml(){
+  if (SITE_ERR) return '<div class="card err">' + esc(SITE_ERR) + '</div>';
+  if (!SITE) return '<div class="card">불러오는 중…</div>';
+  var V = SD.vis || (SD.vis = {sections: clone(SITE.sections), channels: clone(SITE.channels)}), F = siteVis(normSite({sections: V.sections, channels: V.channels, links: SITE.links, posts: SITE.posts}));
+  function cb(path, on, label, st){ return '<label class="sv"><input type="checkbox" data-sk="' + path + '"' + (on ? ' checked' : '') + '> <b>' + label + '</b> <span class="small ' + (on && st[0] ? 'okc' : 'mute') + '">' + esc(on ? st[1] : '꺼짐') + '</span></label>'; }
+  return '<div class="card"><h2>사이트 공개</h2>'
+    + cb('vis.sections.insight', V.sections.insight, 'INSIGHT (글)', F.insight ? [1, '보임 · 공개 글 ' + F.np + '개'] : [0, '공개 글이 없어 아직 안 보임'])
+    + cb('vis.sections.about', V.sections.about, 'ABOUT (소개)', [1, '보임'])
+    + cb('vis.sections.connect', V.sections.connect, 'CONNECT (연결)', F.connect ? [1, '보임 · 연결 수단 ' + F.n + '개'] : [0, '켜진 연결 수단이 없어 아직 안 보임'])
+    + cb('vis.channels.telegram', V.channels.telegram, 'Telegram', F.tg ? [1, F.main && F.main.kind === 'tg' ? '보임 · 대표 채널(머리글·화면 아래·글 끝)' : '보임 · Connect에'] : [0, '켜진 Telegram 주소가 없어 아직 안 보임'])
+    + cb('vis.channels.email', V.channels.email, 'Email', F.em ? [1, '보임 · Connect에'] : [0, '켜진 Email 주소가 없어 아직 안 보임'])
+    + '<p class="help">끄면 메뉴·화면 아래 링크·안내·직접 주소(#insight 등) 모두에서 사라집니다. 시장 화면(주식·ETF·모델 포트폴리오)은 그대로입니다. 체크를 바꾼 뒤 버튼을 눌러야 저장됩니다.'
+    + ' Telegram·Email 스위치는 그 종류 주소 전부를 한 번에 켜고 끕니다. 카카오톡·유튜브 등 나머지는 아래 연결 수단에서 줄마다 켭니다.</p>'
+    + '<div style="margin-top:10px"><button type="button" class="pri" data-act="s_vis">공개 설정 저장</button></div></div>'
+    + linksCard() + aboutCard() + postsCard();
+}
+function linksCard(){
+  var L = SD.links || (SD.links = seedLinks(clone(SITE.links))), V = SD.vis || SITE, F = siteVis({sections: V.sections, channels: V.channels, links: L, posts: []});
+  return '<div class="card"><h2>연결 수단</h2><p class="help" style="margin:0 0 6px">주소를 넣고 \'켜기\'를 체크한 뒤 저장하면 방문자에게 보입니다(주소가 없거나 꺼져 있으면 안 보임). 위에서부터 이 순서로 Connect에 보이고,'
+    + ' 개인 연락·Email을 뺀 맨 위의 켜진 채널 하나가 대표 채널로 머리글·화면 아래·글 끝에 나옵니다 — 지금: <b>' + (F.main ? esc(LKIND[F.main.kind] + (F.main.name ? ' · ' + F.main.name : '')) : '없음') + '</b>.'
+    + ' 설명은 방문자에게 그대로 보이니 실제로 하는 일만 적으세요. 목록에 없는 서비스는 \'기타\'에 주소만 넣으면 됩니다.</p>'
+    + L.map(function(l, i){
+      var ph = LPH[l.kind], has = !!(l.value || l.name || l.desc), dup = L.some(function(m, j){ return j !== i && m.kind === l.kind; });
+      var off = (l.kind === 'tg' || l.kind === 'tgme') && !V.channels.telegram || l.kind === 'mail' && !V.channels.email;
+      var st = !l.value ? (l.on ? '주소가 없어 켤 수 없음' : '비어 있음') : !l.on ? '꺼짐' : off ? '켜짐 · 위 ' + (l.kind === 'mail' ? 'Email' : 'Telegram') + ' 스위치가 꺼져 있어 안 보임' : '켜짐';
+      return '<details class="sl-r" data-li="' + i + '"' + ((l._open != null ? l._open : has) ? ' open' : '') + '><summary><b>' + esc(LKIND[l.kind]) + '</b><span class="small ' + (l.on && l.value && !off ? 'okc' : 'mute') + '">' + esc(st) + '</span>'
+        + (l.value ? '<span class="small mute lv">' + esc(l.value) + '</span>' : '') + '</summary><div class="sl-b">'
+        + '<div class="lr1"><select data-sk="links.' + i + '.kind" aria-label="종류">' + Object.keys(LKIND).map(function(k){ return '<option value="' + k + '"' + (l.kind === k ? ' selected' : '') + '>' + LKIND[k] + '</option>'; }).join('') + '</select>'
+        + '<label class="tgl"><input type="checkbox" data-sk="links.' + i + '.on"' + (l.on ? ' checked' : '') + '> 켜기</label><span style="flex:1"></span>'
+        + '<button type="button" data-act="s_lup" data-i="' + i + '"' + (i ? '' : ' disabled') + ' aria-label="위로">↑</button><button type="button" data-act="s_ldn" data-i="' + i + '"' + (i < L.length - 1 ? '' : ' disabled') + ' aria-label="아래로">↓</button>'
+        + (has || dup ? '<button type="button" class="dng" data-act="s_ldel" data-i="' + i + '">삭제</button>' : '') + '</div>'
+        + '<input data-sk="links.' + i + '.value" value="' + esc(l.value) + '" placeholder="' + esc(ph[0]) + '" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="주소">'
+        + '<input data-sk="links.' + i + '.name" value="' + esc(l.name) + '" placeholder="이름 — 비우면 “' + esc(ph[1]) + '”" maxlength="' + SMAX.name + '" aria-label="이름">'
+        + '<input data-sk="links.' + i + '.desc" value="' + esc(l.desc) + '" placeholder="설명 — 방문자에게 보일 한 줄(실제로 하는 일만)" maxlength="' + SMAX.desc + '" aria-label="설명"></div></details>';
+    }).join('')
+    + '<div class="acts" style="margin-top:10px"><button type="button" data-act="s_ladd">+ 한 줄 더(같은 종류 여러 개 등)</button><button type="button" class="pri" data-act="s_links">연결 수단 저장</button></div></div>';
+}
+function aboutCard(){
+  var A = SD.about || (SD.about = clone(SITE.about));
+  return '<div class="card"><h2>ABOUT — 운영자 소개</h2>'
+    + '<label class="small mute">한 줄 소개<input data-sk="about.headline" value="' + esc(A.headline) + '" maxlength="' + SMAX.headline + '"></label>'
+    + '<label class="small mute" style="display:block;margin-top:10px">본문 (빈 줄 = 문단 · \'- \' = 목록)<textarea data-sk="about.body" rows="8">' + esc(A.body) + '</textarea></label>'
+    + '<p class="help">비워 두면 About에는 사이트 소개(보여주는 것 · 데이터와 기준 · 원칙)만 보입니다. 사이트 소개는 고정 문구입니다.</p>'
+    + '<div style="margin-top:10px"><button type="button" class="pri" data-act="s_about">소개 저장</button></div></div>';
+}
+function postsCard(){
+  var P = SITE.posts.slice().sort(function(a, b){ return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; }), E = SD.post, h = '<div class="card"><h2>INSIGHT — 글</h2>';
+  if (E) { var p = E.p;
+    h += '<div class="pe"><label class="small mute">제목<input data-sk="post.p.title" value="' + esc(p.title) + '" maxlength="' + SMAX.title + '"></label>'
+      + '<div class="lr1" style="margin-top:8px"><label class="small mute" style="flex:1 1 120px">분류<select data-sk="post.p.cat">' + SCATS.map(function(c){ return '<option' + (p.cat === c ? ' selected' : '') + '>' + c + '</option>'; }).join('') + '</select></label>'
+      + '<label class="small mute" style="flex:1 1 120px">날짜<input data-sk="post.p.date" value="' + esc(p.date) + '" placeholder="2026-09-26"></label></div>'
+      + '<label class="small mute" style="display:block;margin-top:8px">본문 (빈 줄 = 문단 · \'## \' = 소제목 · \'- \' = 목록 · 주소는 자동 링크)<textarea data-sk="post.p.body" rows="14">' + esc(p.body) + '</textarea></label>'
+      + '<label class="tgl" style="margin-top:8px"><input type="checkbox" data-sk="post.p.on"' + (p.on ? ' checked' : '') + '> 공개 (체크하지 않으면 저장만 되고 방문자에게 안 보임)</label>'
+      + '<div class="acts" style="margin-top:10px"><button type="button" class="pri" data-act="s_psave">' + (E.mode === 'new' ? '글 저장' : '수정 저장') + '</button><button type="button" data-act="s_pcancel">취소</button></div></div>';
+  } else h += '<div class="acts" style="margin-bottom:6px"><button type="button" class="pri" data-act="s_pnew">+ 새 글</button></div>';
+  h += P.map(function(q){ return '<div class="plr"><span class="num small mute">' + esc(q.date) + '</span><span class="chip">' + esc(q.cat) + '</span><b>' + esc(q.title) + '</b>'
+      + '<span class="small ' + (q.on ? 'okc' : 'mute') + '">' + (q.on ? '공개' : '비공개') + '</span><span style="flex:1"></span>'
+      + '<button type="button" data-act="s_pedit" data-id="' + esc(q.id) + '"' + (E ? ' disabled' : '') + '>수정</button><button type="button" class="dng" data-act="s_pdel" data-id="' + esc(q.id) + '"' + (E ? ' disabled' : '') + '>삭제</button></div>'; }).join('')
+    || '<p class="mute small">아직 글이 없습니다. INSIGHT를 켜도 공개 글이 생길 때까지 방문자에게는 보이지 않습니다.</p>';
+  return h + '<p class="help">사이트 문서 사용량 ' + Math.round(JSON.stringify(SITE).length / 1000) + 'k / 290k자</p></div>';
+}
+function sdSet(path, val){ var ks = path.split('.'), o = SD; for (var i = 0; i < ks.length - 1; i++) o = o[ks[i]]; o[ks[ks.length - 1]] = val; }
+function siteClick(a, d){
+  if (!SITE || SBUSY) return;
+  var N = clone(SITE), fail = function(x){ toast(x.message, true); }, L = SD.links || (SD.links = clone(SITE.links)), i = +d.i;
+  if (a === 's_vis') { N.sections = clone(SD.vis.sections); N.channels = clone(SD.vis.channels); saveSite(N, 'vis', '공개 설정 저장됨 — 사이트에 바로 반영').catch(fail); }
+  else if (a === 's_ladd') { L.push({kind: 'etc', name: '', value: '', desc: '', on: false, _open: true}); render(); }
+  else if (a === 's_lup' || a === 's_ldn') { var j = a === 's_lup' ? i - 1 : i + 1, x = L[i]; L[i] = L[j]; L[j] = x; render(); }
+  else if (a === 's_ldel') { if (!L[i].value || confirm((L[i].name || L[i].value) + ' — 목록에서 뺄까요? (저장해야 사이트에 반영)')) { L.splice(i, 1); render(); } }
+  else if (a === 's_links') {   // 빈 칸(주소·이름·설명 없음 + 꺼짐)은 저장하지 않는다 — 다음에 열면 종류별 빈 칸이 다시 보인다
+    N.links = L.map(function(l){ return {kind: l.kind, name: sstr(l.name), value: linkNorm(l.kind, l.value), desc: sstr(l.desc), on: !!l.on}; })
+      .filter(function(l){ return l.value || l.name || l.desc || l.on; });
+    saveSite(N, 'links', '연결 수단 저장됨').catch(fail); }
+  else if (a === 's_about') { N.about = clone(SD.about); saveSite(N, 'about', '소개 저장됨').catch(fail); }
+  else if (a === 's_pnew') { SD.post = {mode: 'new', p: {id: 'p' + Date.now().toString(36), date: today(), cat: SCATS[0], title: '', body: '', on: false}, _0: ''}; SD.post._0 = JSON.stringify(SD.post.p); render(); }
+  else if (a === 's_pedit') { var pe = SITE.posts.filter(function(p){ return p.id === d.id; })[0]; if (pe) { SD.post = {mode: 'edit', p: clone(pe)}; SD.post._0 = JSON.stringify(SD.post.p); render(); } }
+  else if (a === 's_pcancel') { if (JSON.stringify(SD.post.p) === SD.post._0 || confirm('고친 내용이 사라집니다. 닫을까요?')) { SD.post = null; render(); } }
+  else if (a === 's_psave') {
+    var P = SD.post.p, k = -1; N.posts.forEach(function(p, n){ if (p.id === P.id) k = n; });
+    if (k >= 0) N.posts[k] = clone(P); else N.posts.push(clone(P));
+    saveSite(N, 'post', P.on ? '글 저장됨 — 공개' : '글 저장됨 — 비공개(공개하려면 수정에서 \'공개\' 체크)').catch(fail);
+  }
+  else if (a === 's_pdel') { var pd = SITE.posts.filter(function(p){ return p.id === d.id; })[0];
+    if (pd && confirm('“' + pd.title + '” 글을 지울까요? 되돌릴 수 없습니다.')) { N.posts = N.posts.filter(function(p){ return p.id !== d.id; }); saveSite(N, null, '글 삭제됨').catch(fail); } }
+}
+
+function start(){
+  $('#root').innerHTML = '<div class="card">불러오는 중…</div>';
+  Promise.all([loadDoc(), canWrite(), loadIndex(), loadCalc()]).then(function(a){
+    var d = a[0];
+    if (!a[1]) {
+      $('#root').innerHTML = '<div class="card"><b class="err">이 계정(' + esc((SES && SES.email) || '') + ')은 관리자가 아닙니다.</b>'
+        + '<p class="help">보기만 할 수 있고 저장은 막혀 있습니다(Firestore 보안 규칙). 관리자 계정으로 다시 로그인하세요.</p><button type="button" id="out2">로그아웃</button></div>';
+      $('#out2').onclick = logout;
+      return;
+    }
+    UT = d.ut; S = norm(d.state);
+    render();
+    loadPriv().then(function(){ render(); nlInit(); });   // 관리자 전용 문서(손절가·지정가·명령 기록) → 명령 입력칸
+    loadSite().then(function(){ if (VIEW === 'site') render(); });   // 사이트 탭(D-18) 설정
+  }).catch(function(x){ $('#root').innerHTML = '<div class="card err">' + esc(x.message) + '</div>'; });
+}
+var rt = lsGet('rs_admin_rt');
+if (rt) refresh(rt).then(start, function(x){ lsSet('rs_admin_rt', null); showLogin(x.message); }); else showLogin();
+})();
+</script>
+</body>
+</html>
